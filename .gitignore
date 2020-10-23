@@ -1,0 +1,8 @@
+*.o
+!*.c
+!*.cpp
+!*.cu
+Makefile
+CMakeList.txt
+build
+
