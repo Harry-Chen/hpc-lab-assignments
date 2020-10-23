@@ -6,3 +6,4 @@ Makefile
 CMakeList.txt
 build
 benchmark-*
+.vscode/

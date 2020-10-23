@@ -3,7 +3,7 @@
 # Your code must compile (with icc) with the given CFLAGS. You may experiment with the OPT variable to invoke additional compiler options.
 
 CC = icc
-OPT = -O3 -xAVX2
+OPT = -O3 -xAVX2 -g
 CFLAGS = -Wall -DGETTIMEOFDAY -std=c99 $(OPT)
 LDFLAGS = -Wall
 # mkl is needed for blas implementation
