@@ -22,15 +22,19 @@ const char *dgemm_desc = "Mmple blocked dgemm.";
  *  C := C + A * B
  * where C is M-by-N, A is M-by-K, and B is K-by-N. */
 static inline __attribute__((always_inline)) void do_block_naive(
-    int lda, int M, int N, int K, double * __restrict__  A, double * __restrict__  B, double * __restrict__  C) {
+    int lda, int M, int N, int K, double *__restrict__ A,
+    double *__restrict__ B, double *__restrict__ C) {
   /* For each row i of A */
+#pragma ivdep
   for (int i = 0; i < M; ++i) {
     /* For each column j of B */
     __builtin_prefetch(A + (i + 1) * lda, 0);
     // __builtin_prefetch(C + i * lda, 1);
+#pragma ivdep
     for (int j = 0; j < N; ++j) {
       /* Compute C(i,j) */
       double cij = C[i * lda + j];
+#pragma ivdep
       for (int k = 0; k < K; ++k) cij += A[i * lda + k] * B[k * lda + j];
       C[i * lda + j] = cij;
     }
@@ -39,8 +43,8 @@ static inline __attribute__((always_inline)) void do_block_naive(
 
 // row major
 static inline __attribute__((always_inline)) void do_block_simd(
-    int n, int M, int N, int K, double * __restrict__  A, double * __restrict__  B, double * __restrict__  C) {
-
+    int n, int M, int N, int K, double *__restrict__ A, double *__restrict__ B,
+    double *__restrict__ C) {
   for (int j = 0; j < BLOCK_SIZE_N; j += 4 * UNROLL) {
     for (int i = 0; i < M; i++) {
       __m256d ymm[UNROLL];
@@ -74,7 +78,8 @@ static inline __attribute__((always_inline)) void do_block_simd(
  *  C := C + A * B
  * where A, B, and C are lda-by-lda matrices stored in column-major format.
  * On exit, A and B maintain their input values. */
-void square_dgemm(int lda, double * __restrict__  A, double * __restrict__  B, double * __restrict__ C) {
+void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
+                  double *__restrict__ C) {
   // (A*B)^T = B^T * A^T, so we can treat A, B, C in row-major format and
   // calculate C = C + B * A swap A and B for Mmplicity
   double *temp = A;
