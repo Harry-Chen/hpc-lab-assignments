@@ -3,7 +3,7 @@
 # Your code must compile (with icc) with the given CFLAGS. You may experiment with the OPT variable to invoke additional compiler options.
 
 CC = icc
-OPT =
+OPT = -O3 -xAVX2
 CFLAGS = -Wall -DGETTIMEOFDAY -std=c99 $(OPT)
 LDFLAGS = -Wall
 # mkl is needed for blas implementation
@@ -12,11 +12,8 @@ LDLIBS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lpthread -lm
 targets = benchmark-test benchmark-naive benchmark-blocked benchmark-blas
 objects = benchmark-test.o benchmark.o dgemm-naive.o dgemm-blocked.o dgemm-blas.o
 
-.PHONY : default
-default : all
-
 .PHONY : all
-all : clean $(targets)
+all : $(targets)
 
 benchmark-test : benchmark-test.o dgemm-blocked.o
 	$(CC) -o $@ $^ $(LDLIBS)
