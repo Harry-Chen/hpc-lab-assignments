@@ -1,4 +1,7 @@
+#define _GNU_SOURCE
 
+#include <stdio.h>
+#include <sched.h>
 #include <immintrin.h>
 
 const char *dgemm_desc = "Mmple blocked dgemm.";
@@ -12,9 +15,6 @@ const char *dgemm_desc = "Mmple blocked dgemm.";
 #define BLOCK_SIZE_K 32
 
 #define UNROLL (BLOCK_SIZE_N / 4)
-#if UNROLL > 15
-#error not enough AVX registers
-#endif
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 
@@ -105,4 +105,12 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
                          C + i * lda + j);
         }
       }
+}
+
+// bind this process to CPU 1
+__attribute__((constructor)) void bind_core() {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  CPU_SET(1, &set);
+  sched_setaffinity(0, sizeof(set), &set);
 }
