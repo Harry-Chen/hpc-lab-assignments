@@ -1,17 +1,13 @@
 #define _GNU_SOURCE
 
+#include <assert.h>
+#include <immintrin.h>
+#include <sched.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
-#include <stdbool.h>
-#include <sched.h>
-#include <immintrin.h>
 
 const char *dgemm_desc = "Mmple blocked dgemm.";
-
-#if !defined(BLOCK_SIZE)
-#define BLOCK_SIZE 32
-#endif
 
 const int BLOCK_SIZE_M = 32;
 const int BLOCK_SIZE_N = 32;
@@ -21,7 +17,6 @@ const int UNROLL = BLOCK_SIZE_N / 4;
 const int MAX_N = 2048;
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
-
 
 /* This auxiliary subroutine performs a smaller dgemm operation
  *  C := C + A * B
@@ -33,8 +28,8 @@ static inline __attribute__((always_inline)) void do_block_naive(
 #pragma ivdep
   for (int i = 0; i < M; ++i) {
     /* For each column j of B */
-    __builtin_prefetch(A + (i + 1) * lda, 0);
-    // __builtin_prefetch(C + i * lda, 1);
+    __builtin_prefetch(A + i * lda, 0);
+    __builtin_prefetch(C + i * lda, 1);
 #pragma ivdep
     for (int j = 0; j < N; ++j) {
       /* Compute C(i,j) */
@@ -48,35 +43,185 @@ static inline __attribute__((always_inline)) void do_block_naive(
 
 // row major
 static inline __attribute__((always_inline)) void do_block_simd(
-    int n, int M, int N, int K, double *__restrict__ A, double *__restrict__ B,
-    double *__restrict__ C) {
+    int lda, int M, int N, int K, double *__restrict__ A,
+    double *__restrict__ B, double *__restrict__ C) {
   for (int j = 0; j < BLOCK_SIZE_N; j += 4 * UNROLL) {
     for (int i = 0; i < M; i++) {
       __m256d ymm[UNROLL];
 
 #pragma unroll(UNROLL)
       for (int x = 0; x < UNROLL; x++) {
-        ymm[x] = _mm256_load_pd(C + i * n + j + x * 4);
+        ymm[x] = _mm256_load_pd(C + i * lda + j + x * 4);
       }
 
-      __builtin_prefetch(A + (i + 1) * n, 0);
+      __builtin_prefetch(A + i * lda, 0);
 
 #pragma unroll(BLOCK_SIZE_K)
       for (int k = 0; k < BLOCK_SIZE_K; k++) {
 #pragma unroll(UNROLL)
         for (int x = 0; x < UNROLL; x++) {
-          ymm[x] = _mm256_add_pd(
-              ymm[x], _mm256_mul_pd(_mm256_load_pd(B + k * n + j + x * 4),
-                                    _mm256_broadcast_sd(A + i * n + k)));
+          ymm[x] =
+              _mm256_fmadd_pd(_mm256_load_pd(B + k * lda + j + x * 4),
+                              _mm256_broadcast_sd(A + i * lda + k), ymm[x]);
         }
       }
 
 #pragma unroll(UNROLL)
       for (int x = 0; x < UNROLL; x++) {
-        _mm256_store_pd(C + i * n + j + x * 4, ymm[x]);
+        _mm256_store_pd(C + i * lda + j + x * 4, ymm[x]);
       }
     }
   }
+}
+
+
+
+// C = A +/- B
+static inline __attribute__((always_inline)) void matrix_add(bool add, 
+  int lda, int ldb, int ldc, int n, double *__restrict__ A, double *__restrict__ B,
+    double *__restrict__ C
+) {
+  const int ADD_UNROLL = 8;
+  if (add) {
+    for (int i = 0; i < n; ++i) {
+      for (int j = 0; j < n; j += 4 * ADD_UNROLL) {
+  #pragma unroll(ADD_UNROLL)
+        for (int x = 0; x < ADD_UNROLL; x++) {
+          _mm256_store_pd(C + i * ldc + j + x * 4, _mm256_add_pd(_mm256_load_pd(A + i * lda + j + x * 4), _mm256_load_pd(B + i * ldb + j + x * 4)));
+        }
+      }
+    }
+  } else {
+    for (int i = 0; i < n; ++i) {
+      for (int j = 0; j < n; j += 4 * ADD_UNROLL) {
+  #pragma unroll(ADD_UNROLL)
+        for (int x = 0; x < ADD_UNROLL; x++) {
+          _mm256_store_pd(C + i * ldc + j + x * 4, _mm256_sub_pd(_mm256_load_pd(A + i * lda + j + x * 4), _mm256_load_pd(B + i * ldb + j + x * 4)));
+        }
+      }
+    }
+  }
+}
+
+
+// C += A +/- B
+static inline __attribute__((always_inline)) void matrix_add_to(bool add, 
+  int lda, int ldb, int ldc, int n, double *__restrict__ A, double *__restrict__ B,
+    double *__restrict__ C
+) {
+  const int ADD_UNROLL = 8;
+  if (add) {
+    for (int i = 0; i < n; ++i) {
+      for (int j = 0; j < n; j += 4 * ADD_UNROLL) {
+  #pragma unroll(ADD_UNROLL)
+        for (int x = 0; x < ADD_UNROLL; x++) {
+          _mm256_store_pd(C + i * ldc + j + x * 4, _mm256_add_pd(_mm256_load_pd(C + i * ldc + j + x * 4), _mm256_add_pd(_mm256_load_pd(A + i * lda + j + x * 4), _mm256_load_pd(B + i * ldb + j + x * 4))));
+        }
+      }
+    }
+  } else {
+    for (int i = 0; i < n; ++i) {
+      for (int j = 0; j < n; j += 4 * ADD_UNROLL) {
+  #pragma unroll(ADD_UNROLL)
+        for (int x = 0; x < ADD_UNROLL; x++) {
+          _mm256_store_pd(C + i * ldc + j + x * 4, _mm256_add_pd(_mm256_load_pd(C + i * ldc + j + x * 4), _mm256_sub_pd(_mm256_load_pd(A + i * lda + j + x * 4), _mm256_load_pd(B + i * ldb + j + x * 4))));
+        }
+      }
+    }
+  }
+}
+
+static double st_im_1[MAX_N * MAX_N], st_im_2[MAX_N * MAX_N],
+    st_im_3[MAX_N * MAX_N], st_im_4[MAX_N * MAX_N], st_p_1[MAX_N * MAX_N], st_p_2[MAX_N * MAX_N];
+
+static inline void do_block_strassen(
+    int lda, int n, double *__restrict__ A, double *__restrict__ B,
+    double *__restrict__ C, double *__restrict__ im_1,
+    double *__restrict__ im_2, double *__restrict__ im_3, double *__restrict__ im_4,
+    double *__restrict__ p_1, double *__restrict__ p_2) {
+
+  // n is small enough now
+  if (n == BLOCK_SIZE_N) {
+    do_block_simd(lda, n, n, n, A, B, C);
+    return;
+  }
+  int m = n / 2;
+  // compute A11,B11, . . . ,A22,B22
+  double *__restrict__ A11 = A;
+  double *__restrict__ A12 = A + m;
+  double *__restrict__ A21 = A + m * lda;
+  double *__restrict__ A22 = A + m * lda + m;
+  double *__restrict__ B11 = B;
+  double *__restrict__ B12 = B + m;
+  double *__restrict__ B21 = B + m * lda;
+  double *__restrict__ B22 = B + m * lda + m;
+  double *__restrict__ C11 = C;
+  double *__restrict__ C12 = C + m;
+  double *__restrict__ C21 = C + m * lda;
+  double *__restrict__ C22 = C + m * lda + m;
+  // intermediate values offset
+  double *__restrict__ B12m22 = im_1;
+  double *__restrict__ A11p12 = im_1 + m;
+  double *__restrict__ A21p22 = im_1 + m * MAX_N;
+  double *__restrict__ B21m11 = im_2;
+  double *__restrict__ A11p22 = im_2 + m;
+  double *__restrict__ B11p22 = im_2 + m * MAX_N;
+  double *__restrict__ A12m22 = im_3;
+  double *__restrict__ B21p22 = im_3 + m;
+  double *__restrict__ A11m21 = im_3 + m * MAX_N;
+  double *__restrict__ B11p12 = im_4;
+  double *__restrict__ P1 = p_1;
+  double *__restrict__ P2 = p_1 + m;
+  double *__restrict__ P3 = p_1 + m * MAX_N;
+  double *__restrict__ P4 = p_1 + m * MAX_N + m;
+  double *__restrict__ P5 = p_2;
+  double *__restrict__ P6 = p_2 + m;
+  double *__restrict__ P7 = p_2 + m * MAX_N;
+  // for recursive use
+  double *__restrict__ _p_1_ = p_2 + m * MAX_N + m;
+  double *__restrict__ _p_2_ = im_4 + m;
+  double *__restrict__ _im_1_ = im_1 + m * MAX_N + m;
+  double *__restrict__ _im_2_ = im_2 + m * MAX_N + m;
+  double *__restrict__ _im_3_ = im_3 + m * MAX_N + m;
+  double *__restrict__ _im_4_ = im_4 + m * MAX_N + m;
+
+  // calculate intermediate values
+  matrix_add(false, lda, lda, MAX_N, m, B12, B22, B12m22);
+  matrix_add(true,  lda, lda, MAX_N, m, A11, A12, A11p12);
+  matrix_add(true,  lda, lda, MAX_N, m, A21, A22, A21p22);
+  matrix_add(false, lda, lda, MAX_N, m, B21, B11, B21m11);
+  matrix_add(true,  lda, lda, MAX_N, m, A11, A22, A11p22);
+  matrix_add(true,  lda, lda, MAX_N, m, B11, B22, B11p22);
+  matrix_add(false, lda, lda, MAX_N, m, A12, A22, A12m22);
+  matrix_add(true,  lda, lda, MAX_N, m, B21, B22, B21p22);
+  matrix_add(false, lda, lda, MAX_N, m, A11, A21, A11m21);
+  matrix_add(true,  lda, lda, MAX_N, m, B11, B12, B11p12);
+
+  // P1 = Strassen(A11,B12 − B22)
+  do_block_strassen(lda, m, A11, B12m22, P1, _im_1_, _im_2_, _im_3_, _im_4_, _p_1_, _p_2_);
+  // P2 = Strassen(A11 + A12,B22)
+  do_block_strassen(lda, m, A11p12, B22, P2, _im_1_, _im_2_, _im_3_, _im_4_, _p_1_, _p_2_);
+  // P3 = Strassen(A21 + A22,B11)
+  do_block_strassen(lda, m, A21p22, B22, P3, _im_1_, _im_2_, _im_3_, _im_4_, _p_1_, _p_2_);
+  // P4 = Strassen(A22,B21 − B11)
+  do_block_strassen(lda, m, A22, B21m11, P4, _im_1_, _im_2_, _im_3_, _im_4_, _p_1_, _p_2_);
+  // P5 = Strassen(A11 + A22,B11 + B22)
+  do_block_strassen(lda, m, A11p22, B11p22, P5, _im_1_, _im_2_, _im_3_, _im_4_, _p_1_, _p_2_);
+  // P6 = Strassen(A12 − A22,B21 + B22)
+  do_block_strassen(lda, m, A12m22, B21p22, P6, _im_1_, _im_2_, _im_3_, _im_4_, _p_1_, _p_2_);
+  // P7 = Strassen(A11 − A21,B11 + B12)
+  do_block_strassen(lda, m, A11m21, B11p12, P7, _im_1_, _im_2_, _im_3_, _im_4_, _p_1_, _p_2_);
+  // C11 = P5 + P4 − P2 + P6
+  matrix_add(true, MAX_N, MAX_N, lda, m, P5, P4, C11);
+  matrix_add_to(false, MAX_N, MAX_N, lda, m, P6, P2, C11);
+  // C12 = P1 + P2
+  matrix_add(true, MAX_N, MAX_N, lda, m, P1, P2, C12);
+  // C21 = P3 + P4
+  matrix_add(true, MAX_N, MAX_N, lda, m, P3, P4, C21);
+  // C22 = P1 + P5 − P3 − P7
+  matrix_add(false, MAX_N, MAX_N, lda, m, P1, P3, C22);
+  matrix_add_to(false, MAX_N, MAX_N, lda, m, P5, P7, C22);
+
 }
 
 static double A_buf[MAX_N * MAX_N], B_buf[MAX_N * MAX_N], C_buf[MAX_N * MAX_N];
@@ -100,19 +245,30 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   // do some padding
   if (remain > BLOCK_SIZE_N / 2) {
     pad = true;
-    dim = (lda / BLOCK_SIZE + 1) * BLOCK_SIZE;
+    dim = (lda / BLOCK_SIZE_N + 1) * BLOCK_SIZE_N;
     for (int i = 0; i < lda; ++i) {
+      __builtin_prefetch(A_buf + i * MAX_N, 1);
+      __builtin_prefetch(B_buf + i * MAX_N, 1);
+      __builtin_prefetch(C_buf + i * MAX_N, 1);
+      __builtin_prefetch(A + i * lda, 0);
+      __builtin_prefetch(B + i * lda, 0);
+      __builtin_prefetch(C + i * lda, 0);
       memcpy(A_buf + i * MAX_N, A + i * lda, sizeof(double) * dim);
       memcpy(B_buf + i * MAX_N, B + i * lda, sizeof(double) * dim);
       memcpy(C_buf + i * MAX_N, C + i * lda, sizeof(double) * dim);
     }
   }
 
-  
   double *__restrict__ _A = pad ? A_buf : A;
   double *__restrict__ _B = pad ? B_buf : B;
   double *__restrict__ _C = pad ? C_buf : C;
   int stride = pad ? MAX_N : lda;
+
+  // power of 2 - use strassen
+  if (dim & (dim - 1) == 0) {
+    do_block_strassen(stride, dim, _A, _B, _C, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
+    return;
+  }
 
   /* For each block-row of A */
   for (int i = 0; i < dim; i += BLOCK_SIZE_M) {
@@ -127,8 +283,8 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
 
         if (N == BLOCK_SIZE_N && K == BLOCK_SIZE_K) {
           /* Perform individual block dgemm */
-          do_block_simd(stride, M, N, K, _A + i * stride + k, _B + k * stride + j,
-                        _C + i * stride + j);
+          do_block_simd(stride, M, N, K, _A + i * stride + k,
+                        _B + k * stride + j, _C + i * stride + j);
         } else {
           do_block_naive(lda, M, N, K, A + i * lda + k, B + k * lda + j,
                          C + i * lda + j);
@@ -140,6 +296,12 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   // copy data back
   if (pad) {
     for (int i = 0; i < lda; ++i) {
+      __builtin_prefetch(A_buf + i * MAX_N, 0);
+      __builtin_prefetch(B_buf + i * MAX_N, 0);
+      __builtin_prefetch(C_buf + i * MAX_N, 0);
+      __builtin_prefetch(A + i * lda, 1);
+      __builtin_prefetch(B + i * lda, 1);
+      __builtin_prefetch(C + i * lda, 1);
       memcpy(A + i * lda, A_buf + i * MAX_N, sizeof(double) * lda);
       memcpy(B + i * lda, B_buf + i * MAX_N, sizeof(double) * lda);
       memcpy(C + i * lda, C_buf + i * MAX_N, sizeof(double) * lda);
