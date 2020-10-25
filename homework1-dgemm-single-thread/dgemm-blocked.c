@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#define likely(x)      __builtin_expect(!!(x), 1)
+#define unlikely(x)    __builtin_expect(!!(x), 0)
+
 const char *dgemm_desc = "Mmple blocked dgemm.";
 
 const int BLOCK_SIZE_M = 32;
@@ -47,13 +50,16 @@ static inline __attribute__((always_inline)) void do_block_naive(
 static inline __attribute__((always_inline)) void do_block_simd(
     int lda, int ldb, int ldc, int M, int N, int K, double *__restrict__ A,
     double *__restrict__ B, double *__restrict__ C) {
+
+  // fprintf(stderr, "SIMD %d %d %d %p %p %p %d %d %d\n", M, N, K, A, B, C, lda, ldb, ldc);
+
   for (int j = 0; j < BLOCK_SIZE_N; j += 4 * UNROLL) {
     for (int i = 0; i < M; i++) {
       __m256d ymm[UNROLL];
 
 #pragma unroll(UNROLL)
       for (int x = 0; x < UNROLL; x++) {
-        ymm[x] = _mm256_load_pd(C + i * ldc + j + x * 4);
+        ymm[x] = _mm256_loadu_pd(C + i * ldc + j + x * 4);
       }
 
       __builtin_prefetch(A + i * lda, 0);
@@ -66,14 +72,14 @@ static inline __attribute__((always_inline)) void do_block_simd(
           // ymm[x] =
           //     _mm256_fmadd_pd(_mm256_load_pd(B + k * lda + j + x * 4),
           //                     _mm256_broadcast_sd(A + i * lda + k), ymm[x]);
-          ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(_mm256_load_pd(B + k * ldb + j + x * 4),
+          ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(_mm256_loadu_pd(B + k * ldb + j + x * 4),
                               _mm256_broadcast_sd(A + i * lda + k)));
         }
       }
 
 #pragma unroll(UNROLL)
       for (int x = 0; x < UNROLL; x++) {
-        _mm256_store_pd(C + i * ldc + j + x * 4, ymm[x]);
+        _mm256_storeu_pd(C + i * ldc + j + x * 4, ymm[x]);
       }
     }
   }
@@ -87,7 +93,7 @@ static inline __attribute__((always_inline)) void matrix_add(bool add,
     double *__restrict__ C
 ) {
   const int ADD_UNROLL = 8;
-  if (n >= 4 * ADD_UNROLL) {
+  if (likely(n >= 4 * ADD_UNROLL)) {
     if (add) {
       for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; j += 4 * ADD_UNROLL) {
@@ -131,7 +137,7 @@ static inline __attribute__((always_inline)) void matrix_add_to(bool add,
     double *__restrict__ C
 ) {
   const int ADD_UNROLL = 8;
-  if (n >= 4 * ADD_UNROLL) {
+  if (likely(n >= 4 * ADD_UNROLL)) {
     if (add) {
       for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; j += 4 * ADD_UNROLL) {
@@ -180,10 +186,9 @@ static inline void do_block_strassen(
   // fprintf(stderr, "Strassen %d %p %p %p %d %d %d\n", n, A, B, C, lda, ldb, ldc);
 
   // n is small enough now
-  if (n < BLOCK_SIZE_N) {
+  if (unlikely(n < BLOCK_SIZE_N)) {
     __builtin_unreachable();
-  }
-  if (n == BLOCK_SIZE_N) {
+  } else if (n == BLOCK_SIZE_N) {
     do_block_simd(lda, ldb, ldc, n, n, n, A, B, C);
     return;
   }
@@ -323,7 +328,7 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   int stride = pad ? MAX_N : lda;
 
 #if ENABLE_STRASSEN
-  if ((dim & (dim - 1)) == 0 && dim >= 32) {
+  if ((dim & (dim - 1)) == 0 && dim >= BLOCK_SIZE_N) {
     // power of 2 - use strassen
     do_block_strassen(stride, stride, stride, dim, _A, _B, _C, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
   } else {

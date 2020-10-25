@@ -1,4 +1,8 @@
+#define _GNU_SOURCE
+
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 #include <strings.h>
 #include <mkl.h>
 
@@ -17,21 +21,24 @@ int main(int argc, char *argv[]) {
     double *A = buf, *B = buf + size, *C = buf + 2 * size, *D = buf + 3 * size;
     bzero(buf, sizeof(double) * 4 * size);
 
+    srand48(time(NULL));
+
     for (int i = 0; i < size; ++i) {
-        A[i] = B[i] = i + 1;
+        A[i] = drand48();
+        B[i] = drand48();
     }
 
     square_dgemm(dim, A, B, C);
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, dim, dim, dim, 1.0, A, dim, B, dim, 0.0, D, dim);
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, dim, dim, dim, 1.0, A, dim, B, dim, 0.0, D, dim);
 
     puts("square_dgemm: ");
     for (int i = 0; i < size; ++i) {
-        printf("%.0lf%c", C[i], (i + 1) % dim == 0 ? '\n': '\t');
+        printf("%.3lf%c", C[i], (i + 1) % dim == 0 ? '\n': '\t');
     }
 
     puts("cblas_dgemm: ");
     for (int i = 0; i < size; ++i) {
-        printf("%.0lf%c", D[i], (i + 1) % dim == 0 ? '\n': '\t');
+        printf("%.3lf%c", D[i], (i + 1) % dim == 0 ? '\n': '\t');
     }
 
     return 0;
