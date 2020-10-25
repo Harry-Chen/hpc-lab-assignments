@@ -9,11 +9,14 @@ LDFLAGS = -Wall
 # mkl is needed for blas implementation
 LDLIBS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lpthread -lm
 
-targets = benchmark-test benchmark-naive benchmark-blocked benchmark-blas
+targets = benchmark-test benchmark-naive benchmark-blocked benchmark-blas simple_test
 objects = benchmark-test.o benchmark.o dgemm-naive.o dgemm-blocked.o dgemm-blas.o
 
 .PHONY : all
 all : $(targets)
+
+simple_test: simple_test.c dgemm-blocked.c
+	gcc $^ -fsanitize=address -Wall -std=c99 -g -O3 -mavx2 $(LDLIBS) -o $@
 
 benchmark-test : benchmark-test.o dgemm-blocked.o
 	$(CC) -o $@ $^ $(LDLIBS)
