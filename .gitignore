@@ -7,3 +7,4 @@ CMakeList.txt
 build
 benchmark-*
 .vscode/
+perf.data*

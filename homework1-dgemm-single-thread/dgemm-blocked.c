@@ -180,6 +180,9 @@ static inline void do_block_strassen(
   // fprintf(stderr, "Strassen %d %p %p %p %d %d %d\n", n, A, B, C, lda, ldb, ldc);
 
   // n is small enough now
+  if (n < BLOCK_SIZE_N) {
+    __builtin_unreachable();
+  }
   if (n == BLOCK_SIZE_N) {
     do_block_simd(lda, ldb, ldc, n, n, n, A, B, C);
     return;
@@ -320,7 +323,7 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   int stride = pad ? MAX_N : lda;
 
 #if ENABLE_STRASSEN
-  if ((dim & (dim - 1)) == 0) {
+  if ((dim & (dim - 1)) == 0 && dim >= 32) {
     // power of 2 - use strassen
     do_block_strassen(stride, stride, stride, dim, _A, _B, _C, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
   } else {
