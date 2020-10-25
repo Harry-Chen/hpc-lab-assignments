@@ -1,6 +1,9 @@
 #define _GNU_SOURCE
 
 #include <stdio.h>
+#include <string.h>
+#include <assert.h>
+#include <stdbool.h>
 #include <sched.h>
 #include <immintrin.h>
 
@@ -10,13 +13,15 @@ const char *dgemm_desc = "Mmple blocked dgemm.";
 #define BLOCK_SIZE 32
 #endif
 
-#define BLOCK_SIZE_M 32
-#define BLOCK_SIZE_N 32
-#define BLOCK_SIZE_K 32
+const int BLOCK_SIZE_M = 32;
+const int BLOCK_SIZE_N = 32;
+const int BLOCK_SIZE_K = 32;
 
-#define UNROLL (BLOCK_SIZE_N / 4)
+const int UNROLL = BLOCK_SIZE_N / 4;
+const int MAX_N = 2048;
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
+
 
 /* This auxiliary subroutine performs a smaller dgemm operation
  *  C := C + A * B
@@ -74,6 +79,8 @@ static inline __attribute__((always_inline)) void do_block_simd(
   }
 }
 
+static double A_buf[MAX_N * MAX_N], B_buf[MAX_N * MAX_N], C_buf[MAX_N * MAX_N];
+
 /* This routine performs a dgemm operation
  *  C := C + A * B
  * where A, B, and C are lda-by-lda matrices stored in column-major format.
@@ -86,25 +93,58 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   A = B;
   B = temp;
 
+  bool pad = false;
+  int dim = lda;
+
+  int remain = lda % BLOCK_SIZE_N;
+  // do some padding
+  if (remain > BLOCK_SIZE_N / 2) {
+    pad = true;
+    dim = (lda / BLOCK_SIZE + 1) * BLOCK_SIZE;
+    for (int i = 0; i < lda; ++i) {
+      memcpy(A_buf + i * MAX_N, A + i * lda, sizeof(double) * dim);
+      memcpy(B_buf + i * MAX_N, B + i * lda, sizeof(double) * dim);
+      memcpy(C_buf + i * MAX_N, C + i * lda, sizeof(double) * dim);
+    }
+  }
+
+  
+  double *__restrict__ _A = pad ? A_buf : A;
+  double *__restrict__ _B = pad ? B_buf : B;
+  double *__restrict__ _C = pad ? C_buf : C;
+  int stride = pad ? MAX_N : lda;
+
   /* For each block-row of A */
-  for (int i = 0; i < lda; i += BLOCK_SIZE_M) /* For each block-column of B */
-    for (int j = 0; j < lda; j += BLOCK_SIZE_N)
+  for (int i = 0; i < dim; i += BLOCK_SIZE_M) {
+    /* For each block-column of B */
+    for (int j = 0; j < dim; j += BLOCK_SIZE_N) {
       /* Accumulate block dgemms into block of C */
-      for (int k = 0; k < lda; k += BLOCK_SIZE_K) {
+      for (int k = 0; k < dim; k += BLOCK_SIZE_K) {
         /* Correct block dimenMons if block "goes off edge of" the matrix */
-        int M = min(BLOCK_SIZE_M, lda - i);
-        int N = min(BLOCK_SIZE_N, lda - j);
-        int K = min(BLOCK_SIZE_K, lda - k);
+        int M = min(BLOCK_SIZE_M, dim - i);
+        int N = min(BLOCK_SIZE_N, dim - j);
+        int K = min(BLOCK_SIZE_K, dim - k);
 
         if (N == BLOCK_SIZE_N && K == BLOCK_SIZE_K) {
           /* Perform individual block dgemm */
-          do_block_simd(lda, M, N, K, A + i * lda + k, B + k * lda + j,
-                        C + i * lda + j);
+          do_block_simd(stride, M, N, K, _A + i * stride + k, _B + k * stride + j,
+                        _C + i * stride + j);
         } else {
           do_block_naive(lda, M, N, K, A + i * lda + k, B + k * lda + j,
                          C + i * lda + j);
         }
       }
+    }
+  }
+
+  // copy data back
+  if (pad) {
+    for (int i = 0; i < lda; ++i) {
+      memcpy(A + i * lda, A_buf + i * MAX_N, sizeof(double) * lda);
+      memcpy(B + i * lda, B_buf + i * MAX_N, sizeof(double) * lda);
+      memcpy(C + i * lda, C_buf + i * MAX_N, sizeof(double) * lda);
+    }
+  }
 }
 
 // bind this process to CPU 1
