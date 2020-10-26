@@ -18,6 +18,10 @@
 #define BENCHMARK_TEST 0
 #endif
 
+#ifndef BENCHMARK_PERF
+#define BENCHMARK_PERF 0
+#endif
+
 /* reference_dgemm wraps a call to the BLAS-3 routine DGEMM, via the standard FORTRAN interface - hence the reference semantics. */
 #define DGEMM dgemm_
 extern void DGEMM (char*, char*, int*, int*, int*, double*, double*, int*, double*, int*, double*, double*, int*);
@@ -118,9 +122,11 @@ int main (int argc, char **argv)
     double* B = A + nmax*nmax;
     double* C = B + nmax*nmax;
 
+#if !BENCHMARK_PERF
     fill (A, n*n);
     fill (B, n*n);
     fill (C, n*n);
+#endif
 
     /* Measure performance (in Gflops/s). */
 
@@ -146,6 +152,7 @@ int main (int argc, char **argv)
 
     /* Ensure that error does not exceed the theoretical error bound. */
 
+#if !BENCHMARK_PERF
     /* C := A * B, computed with square_dgemm */
     memset (C, initial, n * n * sizeof(double));
     square_dgemm (n, A, B, C);
@@ -170,6 +177,7 @@ int main (int argc, char **argv)
 	      die("*** FAILURE *** Error in matrix multiply exceeds componentwise error bounds.\n" );
       }
     }
+#endif
   }
 
   free (buf);
