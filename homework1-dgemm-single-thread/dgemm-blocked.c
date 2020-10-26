@@ -331,12 +331,12 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
       double *__restrict__ A_pos = A + i * lda + whole_width;
       double *__restrict__ B_pos = B + i * lda + whole_width;
       double *__restrict__ C_pos = C + i * lda + whole_width;
-      // __builtin_prefetch(A_buf_pos, 1);
-      // __builtin_prefetch(B_buf_pos, 1);
-      // __builtin_prefetch(C_buf_pos, 1);
-      // __builtin_prefetch(A_pos, 0);
-      // __builtin_prefetch(B_pos, 0);
-      // __builtin_prefetch(C_pos, 0);
+      __builtin_prefetch(A_buf_pos, 1);
+      __builtin_prefetch(B_buf_pos, 1);
+      __builtin_prefetch(C_buf_pos, 1);
+      __builtin_prefetch(A_pos, 0);
+      __builtin_prefetch(B_pos, 0);
+      __builtin_prefetch(C_pos, 0);
       memcpy(A_buf_pos, A_pos, sizeof(double) * remain);
       memcpy(B_buf_pos, B_pos, sizeof(double) * remain);
       memcpy(C_buf_pos, C_pos, sizeof(double) * remain);
@@ -349,12 +349,12 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
       double *__restrict__ A_pos = A + i * lda;
       double *__restrict__ B_pos = B + i * lda;
       double *__restrict__ C_pos = C + i * lda;
-      // __builtin_prefetch(A_buf_pos, 1);
-      // __builtin_prefetch(B_buf_pos, 1);
-      // __builtin_prefetch(C_buf_pos, 1);
-      // __builtin_prefetch(A_pos, 0);
-      // __builtin_prefetch(B_pos, 0);
-      // __builtin_prefetch(C_pos, 0);
+      __builtin_prefetch(A_buf_pos, 1);
+      __builtin_prefetch(B_buf_pos, 1);
+      __builtin_prefetch(C_buf_pos, 1);
+      __builtin_prefetch(A_pos, 0);
+      __builtin_prefetch(B_pos, 0);
+      __builtin_prefetch(C_pos, 0);
       memcpy(A_buf_pos, A_pos, sizeof(double) * lda);
       memcpy(B_buf_pos, B_pos, sizeof(double) * lda);
       memcpy(C_buf_pos, C_pos, sizeof(double) * lda);
@@ -381,6 +381,7 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
       for (int k = 0; k < dim; k += BLOCK_SIZE_K) {
         // if in the "whole blocks" region
         if (likely(i < whole_width && j < whole_width && k < whole_width)) {
+#pragma forceinline
           do_block_simd(lda, lda, lda, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, A + i * lda + k,
                           B + k * lda + j, C + i * lda + j, false);
         } else {
@@ -398,11 +399,13 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
             double *__restrict__ A_ = (i < whole_width && k < whole_width) ? A : A_buf;
             double *__restrict__ B_ = (k < whole_width && j < whole_width) ? B : B_buf;
             double *__restrict__ C_ = (i < whole_width && j < whole_width) ? C : C_buf;
+#pragma forceinline
             do_block_simd(stride_a, stride_b, stride_c, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, A_ + i * stride_a + k, B_ + k * stride_b + j,
                 C_ + i * stride_c + j, false);
           } else {
             // printf("naive %d %d %d\n", M, N, K);
             // use naive implementation to calculate remaining numbers
+#pragma forceinline
             do_block_naive(lda, lda, lda, M, N, K, A + i * lda + k, B + k * lda + j,
                           C + i * lda + j);
           }
