@@ -9,7 +9,7 @@ LDFLAGS = -Wall
 # mkl is needed for blas implementation
 LDLIBS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lpthread -lm
 
-targets = benchmark-test benchmark-naive benchmark-blocked benchmark-blas benchmark-strassen simple-test
+targets = benchmark-test benchmark-naive benchmark-blocked benchmark-blas benchmark-strassen
 objects = benchmark-test.o benchmark.o dgemm-naive.o dgemm-blocked.o dgemm-blas.o dgemm-strassen.o benchmark-strassen.o simple-test.o
 
 .PHONY : all
@@ -42,4 +42,4 @@ benchmark-strassen.o: benchmark.c
 
 .PHONY : clean
 clean:
-	rm -f $(targets) $(objects)
+	rm -f $(targets) simple-test $(objects)
