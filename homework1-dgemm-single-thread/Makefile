@@ -9,13 +9,14 @@ LDFLAGS = -Wall
 # mkl is needed for blas implementation
 LDLIBS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lpthread -lm
 
-targets = benchmark-test benchmark-naive benchmark-blocked benchmark-blas simple_test
-objects = benchmark-test.o benchmark.o dgemm-naive.o dgemm-blocked.o dgemm-blas.o
+targets = benchmark-test benchmark-naive benchmark-blocked benchmark-blas benchmark-strassen simple-test
+objects = benchmark-test.o benchmark.o dgemm-naive.o dgemm-blocked.o dgemm-blas.o dgemm-strassen.o benchmark-strassen.o simple-test.o
 
 .PHONY : all
 all : $(targets)
 
-simple_test: simple_test.c dgemm-blocked.c
+# to test correctness via address sanitizer
+simple-test: simple-test.c dgemm-blocked.c
 	gcc $^ -fsanitize=address -Wall -std=c99 -g -O3 -mavx2 $(LDLIBS) -o $@
 
 benchmark-test : benchmark-test.o dgemm-blocked.o
@@ -27,6 +28,14 @@ benchmark-blocked : benchmark.o dgemm-blocked.o
 	$(CC) -o $@ $^ $(LDLIBS)
 benchmark-blas : benchmark.o dgemm-blas.o
 	$(CC) -o $@ $^ $(LDLIBS)
+
+# for Strassen
+benchmark-strassen : benchmark-strassen.o dgemm-strassen.o
+	$(CC) -o $@ $^ $(LDLIBS)
+dgemm-strassen.o: dgemm-blocked.c
+	$(CC) -c $(CFLAGS) -DENABLE_STRASSEN=1 -o $@ $<
+benchmark-strassen.o: benchmark.c
+	$(CC) -c $(CFLAGS) -DENABLE_STRASSEN=1 -o $@ $<
 
 %.o : %.c
 	$(CC) -c $(CFLAGS) $<

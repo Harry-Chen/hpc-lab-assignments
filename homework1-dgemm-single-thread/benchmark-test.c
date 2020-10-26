@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <stdlib.h> // For: exit, drand48, malloc, free, NULL, EXIT_FAILURE
 #include <stdio.h>  // For: perror
 #include <string.h> // For: memset
@@ -10,6 +12,7 @@
 #else
 #include <time.h> // For struct timespec, clock_gettime, CLOCK_MONOTONIC
 #endif
+
 
 /* reference_dgemm wraps a call to the BLAS-3 routine DGEMM, via the standard FORTRAN interface - hence the reference semantics. */
 #define DGEMM dgemm_

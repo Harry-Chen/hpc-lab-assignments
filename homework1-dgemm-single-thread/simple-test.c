@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
     double *A = buf, *B = buf + size, *C = buf + 2 * size, *D = buf + 3 * size;
     bzero(buf, sizeof(double) * 4 * size);
 
-    srand48(time(NULL));
+    srand48(time(0));
 
     for (int i = 0; i < size; ++i) {
         A[i] = drand48();
