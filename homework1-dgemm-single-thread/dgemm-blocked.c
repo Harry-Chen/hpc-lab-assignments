@@ -55,7 +55,6 @@ static inline __attribute__((always_inline)) void do_block_naive(
   }
 }
 
-
 // use AVX2 to calculate C += or = A * B, n >= BLOCK_SIZE_N, row major
 static inline __attribute__((always_inline)) void do_block_simd(
     int lda, int ldb, int ldc, int M, int N, int K, double *__restrict__ A,
@@ -68,6 +67,14 @@ static inline __attribute__((always_inline)) void do_block_simd(
   }
 #endif
 
+  // copy whole A to cache
+  static double A_block[BLOCK_SIZE_N * BLOCK_SIZE_N];
+
+  for (int i = 0; i < BLOCK_SIZE_N; ++i) {
+    memcpy(A_block + i * BLOCK_SIZE_N, A + i * lda, sizeof(double) * BLOCK_SIZE_N);
+  }
+
+  // calculate using AVX intrinsics
   for (int j = 0; j < BLOCK_SIZE_N; j += 4 * UNROLL) {
     for (int i = 0; i < M; i++) {
       __m256d ymm[UNROLL];
@@ -84,8 +91,6 @@ static inline __attribute__((always_inline)) void do_block_simd(
         }
       }
 
-      __builtin_prefetch(A + i * lda, 0);
-
 #pragma unroll(BLOCK_SIZE_K)
       for (int k = 0; k < BLOCK_SIZE_K; k++) {
 #pragma unroll(UNROLL)
@@ -95,7 +100,7 @@ static inline __attribute__((always_inline)) void do_block_simd(
           //     _mm256_fmadd_pd(_mm256_load_pd(B + k * lda + j + x * 4),
           //                     _mm256_broadcast_sd(A + i * lda + k), ymm[x]);
           ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(_mm256_loadu_pd(B + k * ldb + j + x * 4),
-                              _mm256_broadcast_sd(A + i * lda + k)));
+                              _mm256_broadcast_sd(A_block + i * BLOCK_SIZE_N + k)));
         }
       }
 

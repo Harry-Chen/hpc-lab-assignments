@@ -47,6 +47,14 @@ double wall_time ()
 #endif
 }
 
+int randint(int l,int u)
+{
+  int temp;
+  srand((unsigned)time(NULL));
+  temp = floor(l + (1.0*rand()/RAND_MAX)*(u - l + 1 ));
+  return temp;
+}
+
 void die (const char* message)
 {
   perror (message);
@@ -71,7 +79,7 @@ int main (int argc, char **argv)
   printf ("Description:\t%s\n\n", dgemm_desc);
 
   /* Test sizes should highlight performance dips at multiples of certain powers-of-two */
-
+  double initial = randint(1,10);
   int test_sizes[] =
 
   /* A representative subset of the first list for initial test.  */
@@ -127,7 +135,7 @@ int main (int argc, char **argv)
     /* Ensure that error does not exceed the theoretical error bound. */
 
     /* C := A * B, computed with square_dgemm */
-    memset (C, 0, n * n * sizeof(double));
+    memset (C, initial, n * n * sizeof(double));
     square_dgemm (n, A, B, C);
 
     /* Do not explicitly check that A and B were unmodified on square_dgemm exit
