@@ -289,7 +289,7 @@ static inline void do_block_strassen(
 }
 #endif
 
-#define PADDING_DIM 32
+#define PADDING_DIM BLOCK_SIZE_N
 // buffer for DGEMM padding
 static double A_buf[MAX_N * MAX_N], B_buf[MAX_N * MAX_N], C_buf[MAX_N * MAX_N];
 
@@ -309,37 +309,58 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   bool pad = false;
   int dim = lda;
   
+  int whole_count = lda / PADDING_DIM;
+  int whole_width = whole_count * PADDING_DIM;
   int remain = lda % PADDING_DIM; // AVX registers
-  // do some padding
-  if (remain > PADDING_DIM / 2) {
+
+  // pad if remaining numbers are relatively many
+  if (remain > PADDING_DIM / 2 + 1) {
     pad = true;
     dim = (lda / PADDING_DIM + 1) * PADDING_DIM;
-    for (int i = 0; i < lda; ++i) {
-      __builtin_prefetch(A_buf + i * MAX_N, 1);
-      __builtin_prefetch(B_buf + i * MAX_N, 1);
-      __builtin_prefetch(C_buf + i * MAX_N, 1);
-      __builtin_prefetch(A + i * lda, 0);
-      __builtin_prefetch(B + i * lda, 0);
-      __builtin_prefetch(C + i * lda, 0);
-      memcpy(A_buf + i * MAX_N, A + i * lda, sizeof(double) * lda);
-      memcpy(B_buf + i * MAX_N, B + i * lda, sizeof(double) * lda);
-      memcpy(C_buf + i * MAX_N, C + i * lda, sizeof(double) * lda);
+    for (int i = 0; i < whole_width; ++i) {
+      double *__restrict__ A_buf_pos = A_buf + i * MAX_N + whole_width;
+      double *__restrict__ B_buf_pos = B_buf + i * MAX_N + whole_width;
+      double *__restrict__ C_buf_pos = C_buf + i * MAX_N + whole_width;
+      double *__restrict__ A_pos = A + i * lda + whole_width;
+      double *__restrict__ B_pos = B + i * lda + whole_width;
+      double *__restrict__ C_pos = C + i * lda + whole_width;
+      __builtin_prefetch(A_buf_pos, 1);
+      __builtin_prefetch(B_buf_pos, 1);
+      __builtin_prefetch(C_buf_pos, 1);
+      __builtin_prefetch(A_pos, 0);
+      __builtin_prefetch(B_pos, 0);
+      __builtin_prefetch(C_pos, 0);
+      memcpy(A_buf_pos, A_pos, sizeof(double) * remain);
+      memcpy(B_buf_pos, B_pos, sizeof(double) * remain);
+      memcpy(C_buf_pos, C_pos, sizeof(double) * remain);
+    }
+    for (int i = whole_width; i < lda; ++i) {
+      double *__restrict__ A_buf_pos = A_buf + i * MAX_N;
+      double *__restrict__ B_buf_pos = B_buf + i * MAX_N;
+      double *__restrict__ C_buf_pos = C_buf + i * MAX_N;
+      double *__restrict__ A_pos = A + i * lda;
+      double *__restrict__ B_pos = B + i * lda;
+      double *__restrict__ C_pos = C + i * lda;
+      __builtin_prefetch(A_buf_pos, 1);
+      __builtin_prefetch(B_buf_pos, 1);
+      __builtin_prefetch(C_buf_pos, 1);
+      __builtin_prefetch(A_pos, 0);
+      __builtin_prefetch(B_pos, 0);
+      __builtin_prefetch(C_pos, 0);
+      memcpy(A_buf_pos, A_pos, sizeof(double) * lda);
+      memcpy(B_buf_pos, B_pos, sizeof(double) * lda);
+      memcpy(C_buf_pos, C_pos, sizeof(double) * lda);
     }
   }
-
-  double *__restrict__ _A = pad ? A_buf : A;
-  double *__restrict__ _B = pad ? B_buf : B;
-  double *__restrict__ _C = pad ? C_buf : C;
-  int stride = pad ? MAX_N : lda;
 
 #if ENABLE_STRASSEN
   assert(dim == lda);
   if (likely((dim & (dim - 1)) == 0 && dim >= BLOCK_SIZE_N)) {
     // power of 2 - use strassen
     // C_s = A * B
-    do_block_strassen(stride, stride, MAX_N, dim, _A, _B, C_strassen, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
+    do_block_strassen(dim, dim, MAX_N, dim, A, B, C_strassen, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
     // C += C_s
-    matrix_add_single(MAX_N, lda, dim, C_strassen, C);
+    matrix_add_single(MAX_N, dim, dim, C_strassen, C);
     return;
   }
 #endif
@@ -350,18 +371,33 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
     for (int j = 0; j < dim; j += BLOCK_SIZE_N) {
       /* Accumulate block dgemms into block of C */
       for (int k = 0; k < dim; k += BLOCK_SIZE_K) {
-        /* Correct block dimenMons if block "goes off edge of" the matrix */
-        int M = min(BLOCK_SIZE_M, dim - i);
-        int N = min(BLOCK_SIZE_N, dim - j);
-        int K = min(BLOCK_SIZE_K, dim - k);
-
-        if (likely(N == BLOCK_SIZE_N && K == BLOCK_SIZE_K)) {
-          /* Perform individual block dgemm */
-          do_block_simd(stride, stride, stride, M, N, K, _A + i * stride + k,
-                        _B + k * stride + j, _C + i * stride + j, false);
+        // if in the "whole blocks" region
+        if (likely(i < whole_width && j < whole_width && k < whole_width)) {
+          do_block_simd(lda, lda, lda, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, A + i * lda + k,
+                          B + k * lda + j, C + i * lda + j, false);
         } else {
-          do_block_naive(stride, stride, stride, M, N, K, _A + i * stride + k, _B + k * stride + j,
-                        _C + i * stride + j);
+          int M = min(BLOCK_SIZE_M, dim - i);
+          int N = min(BLOCK_SIZE_N, dim - j);
+          int K = min(BLOCK_SIZE_K, dim - k);
+          // printf("SIMD %d %d %d %d %d\n", i, j, k, lda, dim);
+          if (likely(pad)) {
+            // padded, the remaining numbers are all 32x32 blocks
+            // use SIMD kernel to calculate remaining
+            // need to judge whether source / dest data resides in buf or original array
+            int stride_a = (i < whole_width && k < whole_width) ? lda : MAX_N;
+            int stride_b = (k < whole_width && j < whole_width) ? lda : MAX_N;
+            int stride_c = (i < whole_width && j < whole_width) ? lda : MAX_N;
+            double *__restrict__ A_ = (i < whole_width && k < whole_width) ? A : A_buf;
+            double *__restrict__ B_ = (k < whole_width && j < whole_width) ? B : B_buf;
+            double *__restrict__ C_ = (i < whole_width && j < whole_width) ? C : C_buf;
+            do_block_simd(stride_a, stride_b, stride_c, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, A_ + i * stride_a + k, B_ + k * stride_b + j,
+                C_ + i * stride_c + j, false);
+          } else {
+            // printf("naive %d %d %d\n", M, N, K);
+            // use naive implementation to calculate remaining numbers
+            do_block_naive(lda, lda, lda, M, N, K, A + i * lda + k, B + k * lda + j,
+                          C + i * lda + j);
+          }
         }
       }
     }
@@ -369,15 +405,42 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
 
   // copy data back
   if (pad) {
-    // allow overwrite some trailing numbers for row 0...lda-2
-    for (int i = 0; i < lda - 1; ++i) {
-      __builtin_prefetch(C_buf + i * MAX_N, 0);
-      __builtin_prefetch(C + i * lda, 1);
-      memcpy(C + i * lda, C_buf + i * MAX_N, sizeof(double) * dim);
+    for (int i = 0; i < whole_width; ++i) {
+      double *__restrict__ A_buf_pos = A_buf + i * MAX_N + whole_width;
+      double *__restrict__ B_buf_pos = B_buf + i * MAX_N + whole_width;
+      double *__restrict__ C_buf_pos = C_buf + i * MAX_N + whole_width;
+      double *__restrict__ A_pos = A + i * lda + whole_width;
+      double *__restrict__ B_pos = B + i * lda + whole_width;
+      double *__restrict__ C_pos = C + i * lda + whole_width;
+      __builtin_prefetch(A_buf_pos, 0);
+      __builtin_prefetch(B_buf_pos, 0);
+      __builtin_prefetch(C_buf_pos, 0);
+      __builtin_prefetch(A_pos, 1);
+      __builtin_prefetch(B_pos, 1);
+      __builtin_prefetch(C_pos, 1);
+      memcpy(A_pos, A_buf_pos, sizeof(double) * remain);
+      memcpy(B_pos, B_buf_pos, sizeof(double) * remain);
+      memcpy(C_pos, C_buf_pos, sizeof(double) * remain);
     }
-    // the last row must not overflow
-    memcpy(C + (lda - 1) * lda, C_buf + (lda - 1) * MAX_N, sizeof(double) * lda);
+    for (int i = whole_width; i < lda; ++i) {
+      double *__restrict__ A_buf_pos = A_buf + i * MAX_N;
+      double *__restrict__ B_buf_pos = B_buf + i * MAX_N;
+      double *__restrict__ C_buf_pos = C_buf + i * MAX_N;
+      double *__restrict__ A_pos = A + i * lda;
+      double *__restrict__ B_pos = B + i * lda;
+      double *__restrict__ C_pos = C + i * lda;
+      __builtin_prefetch(A_buf_pos, 0);
+      __builtin_prefetch(B_buf_pos, 0);
+      __builtin_prefetch(C_buf_pos, 0);
+      __builtin_prefetch(A_pos, 1);
+      __builtin_prefetch(B_pos, 1);
+      __builtin_prefetch(C_pos, 1);
+      memcpy(A_pos, A_buf_pos, sizeof(double) * lda);
+      memcpy(B_pos, B_buf_pos, sizeof(double) * lda);
+      memcpy(C_pos, C_buf_pos, sizeof(double) * lda);
+    }
   }
+  
 }
 
 // bind this process to CPU 1
