@@ -4,6 +4,7 @@
 #include <sched.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <assert.h>
 #include <string.h>
 
 #define likely(x)      __builtin_expect(!!(x), 1)
@@ -32,21 +33,24 @@ const char *dgemm_desc = "Simple blocked dgemm (with Strassen algorithm).";
  *  C := C + A * B
  * where C is M-by-N, A is M-by-K, and B is K-by-N. */
 static inline __attribute__((always_inline)) void do_block_naive(
-    int lda, int M, int N, int K, double *__restrict__ A,
+    int lda, int ldb, int ldc, int M, int N, int K, double *__restrict__ A,
     double *__restrict__ B, double *__restrict__ C) {
+
+  // fprintf(stderr, "Naive %d %d %d %p %p %p %d %d %d\n", M, N, K, A, B, C, lda, ldb, ldc);
+
   /* For each row i of A */
 #pragma ivdep
   for (int i = 0; i < M; ++i) {
     /* For each column j of B */
     __builtin_prefetch(A + i * lda, 0);
-    __builtin_prefetch(C + i * lda, 1);
+    __builtin_prefetch(C + i * ldc, 1);
 #pragma ivdep
     for (int j = 0; j < N; ++j) {
       /* Compute C(i,j) */
-      double cij = C[i * lda + j];
+      double cij = C[i * ldc + j];
 #pragma ivdep
-      for (int k = 0; k < K; ++k) cij += A[i * lda + k] * B[k * lda + j];
-      C[i * lda + j] = cij;
+      for (int k = 0; k < K; ++k) cij += A[i * lda + k] * B[k * ldb + j];
+      C[i * ldc + j] = cij;
     }
   }
 }
@@ -106,6 +110,19 @@ static inline __attribute__((always_inline)) void do_block_simd(
 
 #if ENABLE_STRASSEN
 
+// B += A
+static inline __attribute__((always_inline)) void matrix_add_single(int lda, int ldb, int n, double *__restrict__ A, double *__restrict__ B) {
+  const int ADD_UNROLL = 8;
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < n; j += 4 * ADD_UNROLL) {
+#pragma unroll(ADD_UNROLL)
+      for (int x = 0; x < ADD_UNROLL; x++) {
+        _mm256_store_pd(B + i * ldb + j + x * 4, _mm256_add_pd(_mm256_load_pd(A + i * lda + j + x * 4), _mm256_load_pd(B + i * ldb + j + x * 4)));
+      }
+    }
+  }
+}
+
 // C = A +/- B, n >= BLOCK_SIZE_N
 static inline __attribute__((always_inline)) void matrix_add(bool add, 
   int lda, int ldb, int ldc, int n, double *__restrict__ A, double *__restrict__ B,
@@ -132,7 +149,6 @@ static inline __attribute__((always_inline)) void matrix_add(bool add,
     }
   }
 }
-
 
 // C += A +/- B, n >= BLOCK_SIZE_N
 static inline __attribute__((always_inline)) void matrix_add_to(bool add, 
@@ -161,9 +177,13 @@ static inline __attribute__((always_inline)) void matrix_add_to(bool add,
   }
 }
 
+// buffers for Strassen algorithm
 static double st_im_1[MAX_N * MAX_N], st_im_2[MAX_N * MAX_N],
     st_im_3[MAX_N * MAX_N], st_im_4[MAX_N * MAX_N], st_p_1[MAX_N * MAX_N], st_p_2[MAX_N * MAX_N];
+static double C_strassen[MAX_N * MAX_N];
 
+
+// calculate C = A * B by Strassen algorithm
 static inline void do_block_strassen(
     int lda, int ldb, int ldc, int n, double *__restrict__ A, double *__restrict__ B,
     double *__restrict__ C, double *__restrict__ im_1,
@@ -269,6 +289,8 @@ static inline void do_block_strassen(
 }
 #endif
 
+#define PADDING_DIM 32
+// buffer for DGEMM padding
 static double A_buf[MAX_N * MAX_N], B_buf[MAX_N * MAX_N], C_buf[MAX_N * MAX_N];
 
 /* This routine performs a dgemm operation
@@ -286,12 +308,12 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
 
   bool pad = false;
   int dim = lda;
-
-  int remain = lda % BLOCK_SIZE_N;
+  
+  int remain = lda % PADDING_DIM; // AVX registers
   // do some padding
-  if (remain > BLOCK_SIZE_N / 2) {
+  if (remain > PADDING_DIM / 2) {
     pad = true;
-    dim = (lda / BLOCK_SIZE_N + 1) * BLOCK_SIZE_N;
+    dim = (lda / PADDING_DIM + 1) * PADDING_DIM;
     for (int i = 0; i < lda; ++i) {
       __builtin_prefetch(A_buf + i * MAX_N, 1);
       __builtin_prefetch(B_buf + i * MAX_N, 1);
@@ -299,9 +321,9 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
       __builtin_prefetch(A + i * lda, 0);
       __builtin_prefetch(B + i * lda, 0);
       __builtin_prefetch(C + i * lda, 0);
-      memcpy(A_buf + i * MAX_N, A + i * lda, sizeof(double) * dim);
-      memcpy(B_buf + i * MAX_N, B + i * lda, sizeof(double) * dim);
-      memcpy(C_buf + i * MAX_N, C + i * lda, sizeof(double) * dim);
+      memcpy(A_buf + i * MAX_N, A + i * lda, sizeof(double) * lda);
+      memcpy(B_buf + i * MAX_N, B + i * lda, sizeof(double) * lda);
+      memcpy(C_buf + i * MAX_N, C + i * lda, sizeof(double) * lda);
     }
   }
 
@@ -311,50 +333,50 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   int stride = pad ? MAX_N : lda;
 
 #if ENABLE_STRASSEN
+  assert(dim == lda);
   if (likely((dim & (dim - 1)) == 0 && dim >= BLOCK_SIZE_N)) {
     // power of 2 - use strassen
-    do_block_strassen(stride, stride, stride, dim, _A, _B, _C, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
-  } else {
-#endif
-    /* For each block-row of A */
-    for (int i = 0; i < dim; i += BLOCK_SIZE_M) {
-      /* For each block-column of B */
-      for (int j = 0; j < dim; j += BLOCK_SIZE_N) {
-        /* Accumulate block dgemms into block of C */
-        for (int k = 0; k < dim; k += BLOCK_SIZE_K) {
-          /* Correct block dimenMons if block "goes off edge of" the matrix */
-          int M = min(BLOCK_SIZE_M, dim - i);
-          int N = min(BLOCK_SIZE_N, dim - j);
-          int K = min(BLOCK_SIZE_K, dim - k);
-
-          if (N == BLOCK_SIZE_N && K == BLOCK_SIZE_K) {
-            /* Perform individual block dgemm */
-            do_block_simd(stride, stride, stride, M, N, K, _A + i * stride + k,
-                          _B + k * stride + j, _C + i * stride + j, false);
-          } else {
-            do_block_naive(lda, M, N, K, A + i * lda + k, B + k * lda + j,
-                          C + i * lda + j);
-          }
-        }
-      }
-    }
-#if ENABLE_STRASSEN
+    // C_s = A * B
+    do_block_strassen(stride, stride, MAX_N, dim, _A, _B, C_strassen, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
+    // C += C_s
+    matrix_add_single(MAX_N, lda, dim, C_strassen, C);
+    return;
   }
 #endif
 
+  /* For each block-row of A */
+  for (int i = 0; i < dim; i += BLOCK_SIZE_M) {
+    /* For each block-column of B */
+    for (int j = 0; j < dim; j += BLOCK_SIZE_N) {
+      /* Accumulate block dgemms into block of C */
+      for (int k = 0; k < dim; k += BLOCK_SIZE_K) {
+        /* Correct block dimenMons if block "goes off edge of" the matrix */
+        int M = min(BLOCK_SIZE_M, dim - i);
+        int N = min(BLOCK_SIZE_N, dim - j);
+        int K = min(BLOCK_SIZE_K, dim - k);
+
+        if (likely(N == BLOCK_SIZE_N && K == BLOCK_SIZE_K)) {
+          /* Perform individual block dgemm */
+          do_block_simd(stride, stride, stride, M, N, K, _A + i * stride + k,
+                        _B + k * stride + j, _C + i * stride + j, false);
+        } else {
+          do_block_naive(stride, stride, stride, M, N, K, _A + i * stride + k, _B + k * stride + j,
+                        _C + i * stride + j);
+        }
+      }
+    }
+  }
+
   // copy data back
   if (pad) {
-    for (int i = 0; i < lda; ++i) {
-      __builtin_prefetch(A_buf + i * MAX_N, 0);
-      __builtin_prefetch(B_buf + i * MAX_N, 0);
+    // allow overwrite some trailing numbers for row 0...lda-2
+    for (int i = 0; i < lda - 1; ++i) {
       __builtin_prefetch(C_buf + i * MAX_N, 0);
-      __builtin_prefetch(A + i * lda, 1);
-      __builtin_prefetch(B + i * lda, 1);
       __builtin_prefetch(C + i * lda, 1);
-      memcpy(A + i * lda, A_buf + i * MAX_N, sizeof(double) * lda);
-      memcpy(B + i * lda, B_buf + i * MAX_N, sizeof(double) * lda);
-      memcpy(C + i * lda, C_buf + i * MAX_N, sizeof(double) * lda);
+      memcpy(C + i * lda, C_buf + i * MAX_N, sizeof(double) * dim);
     }
+    // the last row must not overflow
+    memcpy(C + (lda - 1) * lda, C_buf + (lda - 1) * MAX_N, sizeof(double) * lda);
   }
 }
 
@@ -364,4 +386,7 @@ __attribute__((constructor)) void bind_core() {
   CPU_ZERO(&set);
   CPU_SET(1, &set);
   sched_setaffinity(0, sizeof(set), &set);
+  bzero(A_buf, sizeof(A_buf));
+  bzero(B_buf, sizeof(B_buf));
+  bzero(C_buf, sizeof(C_buf));
 }
