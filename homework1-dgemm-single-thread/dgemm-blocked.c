@@ -76,6 +76,7 @@ static inline __attribute__((always_inline)) void do_block_simd(
 
   // calculate using AVX intrinsics
   for (int j = 0; j < BLOCK_SIZE_N; j += 4 * UNROLL) {
+#pragma ivdep
     for (int i = 0; i < M; i++) {
       __m256d ymm[UNROLL];
 
@@ -322,6 +323,7 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   if (remain > PADDING_DIM / 2 + 1) {
     pad = true;
     dim = (lda / PADDING_DIM + 1) * PADDING_DIM;
+#pragma ivdep
     for (int i = 0; i < whole_width; ++i) {
       double *__restrict__ A_buf_pos = A_buf + i * MAX_N + whole_width;
       double *__restrict__ B_buf_pos = B_buf + i * MAX_N + whole_width;
@@ -339,6 +341,7 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
       memcpy(B_buf_pos, B_pos, sizeof(double) * remain);
       memcpy(C_buf_pos, C_pos, sizeof(double) * remain);
     }
+#pragma ivdep
     for (int i = whole_width; i < lda; ++i) {
       double *__restrict__ A_buf_pos = A_buf + i * MAX_N;
       double *__restrict__ B_buf_pos = B_buf + i * MAX_N;
@@ -410,6 +413,7 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
 
   // copy data back
   if (pad) {
+#pragma ivdep
     for (int i = 0; i < whole_width; ++i) {
       double *__restrict__ A_buf_pos = A_buf + i * MAX_N + whole_width;
       double *__restrict__ B_buf_pos = B_buf + i * MAX_N + whole_width;
@@ -427,6 +431,7 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
       memcpy(B_pos, B_buf_pos, sizeof(double) * remain);
       memcpy(C_pos, C_buf_pos, sizeof(double) * remain);
     }
+#pragma ivdep
     for (int i = whole_width; i < lda; ++i) {
       double *__restrict__ A_buf_pos = A_buf + i * MAX_N;
       double *__restrict__ B_buf_pos = B_buf + i * MAX_N;
