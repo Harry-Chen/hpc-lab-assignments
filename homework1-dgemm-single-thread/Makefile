@@ -36,6 +36,8 @@ dgemm-strassen.o: dgemm-blocked.c
 	$(CC) -c $(CFLAGS) -DENABLE_STRASSEN=1 -o $@ $<
 benchmark-strassen.o: benchmark.c
 	$(CC) -c $(CFLAGS) -DENABLE_STRASSEN=1 -o $@ $<
+benchmark-test.o: benchmark.c
+	$(CC) -c $(CFLAGS) -DBENCHMARK_TEST=1 -o $@ $<
 
 %.o : %.c
 	$(CC) -c $(CFLAGS) $<

@@ -7,14 +7,15 @@
 #include <float.h>  // For: DBL_EPSILON
 #include <math.h>   // For: fabs
 
-#ifdef GETTIMEOFDAY
 #include <sys/time.h> // For struct timeval, gettimeofday
-#else
-#include <time.h> // For struct timespec, clock_gettime, CLOCK_MONOTONIC
-#endif
+#include <time.h> // For struct timespec, clock_gettime, CLOCK_MONOTONIC, time
 
 #ifndef ENABLE_STRASSEN
 #define ENABLE_STRASSEN 0
+#endif
+
+#ifndef BENCHMARK_TEST
+#define BENCHMARK_TEST 0
 #endif
 
 /* reference_dgemm wraps a call to the BLAS-3 routine DGEMM, via the standard FORTRAN interface - hence the reference semantics. */
@@ -85,14 +86,15 @@ int main (int argc, char **argv)
   double initial = randint(1,10);
   int test_sizes[] =
 
-#if !ENABLE_STRASSEN
+#if BENCHMARK_TEST
+  /* A representative subset of the first list for initial test. Currently uncommented. */
+ { 31, 32, 96, 97, 127, 128, 129, 191, 192, 229, 255, 256, 257,
+   319, 320, 321, 417, 479, 480, 511, 512, 639, 640, 767, 768, 769 };
+#elif !ENABLE_STRASSEN
   /* Multiples-of-32, +/- 1. for final benchmarking. */
    {127,128,129,255,256,257,383,384,385,511,512,513,639,640,641,767,768,769,895,896,897,1023,1024,1025,1151,1152,1153,1279,1280,1281};
-
-  /* A representative subset of the first list for initial test. Currently uncommented. */
- // { 31, 32, 96, 97, 127, 128, 129, 191, 192, 229, 255, 256, 257,
- //   319, 320, 321, 417, 479, 480, 511, 512, 639, 640, 767, 768, 769 };
 #else
+  // sizes for strassen
   { 32, 64, 128, 256, 512, 1024, 2048 };
 #endif
 
@@ -162,9 +164,12 @@ int main (int argc, char **argv)
     reference_dgemm (n, -3.*DBL_EPSILON*n, A, B, C);
 
     /* If any element in C is positive, then something went wrong in square_dgemm */
-    for (int i = 0; i < n * n; ++i)
-      if (C[i] > 0)
-	die("*** FAILURE *** Error in matrix multiply exceeds componentwise error bounds.\n" );
+    for (int i = 0; i < n * n; ++i) {
+      if (C[i] > 0) {
+        fprintf(stderr, "Error at position %d: %lf\n", i, C[i]);
+	      die("*** FAILURE *** Error in matrix multiply exceeds componentwise error bounds.\n" );
+      }
+    }
   }
 
   free (buf);
