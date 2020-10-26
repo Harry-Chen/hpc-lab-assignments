@@ -9,11 +9,11 @@
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
-const int BLOCK_SIZE_M = 32;
-const int BLOCK_SIZE_N = 32;
-const int BLOCK_SIZE_K = 32;
+#define BLOCK_SIZE_M 32
+#define BLOCK_SIZE_N 32
+#define BLOCK_SIZE_K 32
 
-const int UNROLL = BLOCK_SIZE_N / 4;
+#define UNROLL (BLOCK_SIZE_N / 4)
 #define MAX_N 2048
 
 #ifndef ENABLE_STRASSEN
