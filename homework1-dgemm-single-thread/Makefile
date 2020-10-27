@@ -3,11 +3,15 @@
 # Your code must compile (with icc) with the given CFLAGS. You may experiment with the OPT variable to invoke additional compiler options.
 
 CC = ./icc-wrapper
-OPT = -fast -xHost -Ofast -ffast-math -ip -ipo -g
-CFLAGS = -Wall -DGETTIMEOFDAY -std=c99 $(OPT)
+OPT_COMMON = -Ofast -ffast-math
+OPT = $(OPT_COMMON) -fast -xHost -ip -ipo
+OPT_GCC = $(OPT_COMMON) -march=native -mtune=native
+CFLAGS_COMMON = -Wall -DGETTIMEOFDAY -std=c99 -g
+CFLAGS = $(CFLAGS_COMMON) $(OPT)
+CFLAGS_GCC = $(CFLAGS_COMMON) $(OPT_GCC)
 LDFLAGS = -Wall
 # mkl is needed for blas implementation
-LDLIBS = -ipo -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lpthread -lm
+LDLIBS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lpthread -lm
 
 targets = benchmark-test benchmark-naive benchmark-blocked benchmark-blas benchmark-strassen benchmark-perf
 objects = benchmark-test.o benchmark.o dgemm-naive.o dgemm-blocked.o dgemm-blas.o dgemm-strassen.o benchmark-strassen.o benchmark-perf.o simple-test.o
@@ -17,19 +21,19 @@ all : $(targets)
 
 # to test correctness via address sanitizer
 simple-test: simple-test.c dgemm-blocked.c
-	gcc $^ -fsanitize=address -Wall -std=c99 -g -O3 -mavx2 $(LDLIBS) -o $@
+	gcc  -o $@ $^ $(CFLAGS_GCC) -fsanitize=address $(LDLIBS)
 
 benchmark-test: benchmark-test.o dgemm-blocked.o
-	$(CC) -o $@ $^ $(LDLIBS)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 benchmark-perf: benchmark-perf.o dgemm-blocked.o
-	$(CC) -o $@ $^ $(LDLIBS)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 benchmark-naive: benchmark.o dgemm-naive.o
-	$(CC) -o $@ $^ $(LDLIBS)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 benchmark-blocked: benchmark.o dgemm-blocked.o
-	$(CC) -o $@ $^ $(LDLIBS)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 benchmark-blas: benchmark.o dgemm-blas.o
-	$(CC) -o $@ $^ $(LDLIBS)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 
 # for Strassen
