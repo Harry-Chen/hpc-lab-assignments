@@ -3,6 +3,7 @@
 #include <immintrin.h>
 #include <sched.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
@@ -10,7 +11,7 @@
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
-#define MAX_N 3000
+#define MAX_N 2000
 
 #ifndef ENABLE_STRASSEN
 #define ENABLE_STRASSEN 0
@@ -251,7 +252,7 @@ static inline void do_block_strassen(
 #endif
 
 // buffer for DGEMM padding
-static double A_buf[MAX_N * MAX_N], B_buf[MAX_N * MAX_N], C_buf[MAX_N * MAX_N];
+double *A_buf, *B_buf, *C_buf;
 
 /* This routine performs a dgemm operation
  *  C := C + A * B
@@ -375,6 +376,9 @@ __attribute__((constructor)) void bind_core() {
   CPU_ZERO(&set);
   CPU_SET(1, &set);
   sched_setaffinity(0, sizeof(set), &set);
+  posix_memalign((void **)&A_buf, 64, MAX_N * MAX_N * sizeof(double));
+  posix_memalign((void **)&B_buf, 64, MAX_N * MAX_N * sizeof(double));
+  posix_memalign((void **)&C_buf, 64, MAX_N * MAX_N * sizeof(double));
   bzero(A_buf, sizeof(A_buf));
   bzero(B_buf, sizeof(B_buf));
   bzero(C_buf, sizeof(C_buf));
