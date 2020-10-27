@@ -15,7 +15,7 @@
 #define BLOCK_SIZE_K 32
 
 #define UNROLL (BLOCK_SIZE_N / 4)
-#define MAX_N 2048
+#define MAX_N 3000
 
 #ifndef ENABLE_STRASSEN
 #define ENABLE_STRASSEN 0
@@ -33,8 +33,8 @@ const char *dgemm_desc = "Simple blocked dgemm (with Strassen algorithm).";
  *  C := C + A * B
  * where C is M-by-N, A is M-by-K, and B is K-by-N. */
 static inline __attribute__((always_inline)) void do_block_naive(
-    int lda, int ldb, int ldc, int M, int N, int K, double *__restrict__ A,
-    double *__restrict__ B, double *__restrict__ C) {
+    int lda, int ldb, int ldc, int M, int N, int K, const double *__restrict__ const A,
+    const double *__restrict__ const B, double *__restrict__ const C) {
 
   // fprintf(stderr, "Naive %d %d %d %p %p %p %d %d %d\n", M, N, K, A, B, C, lda, ldb, ldc);
 
@@ -57,8 +57,8 @@ static inline __attribute__((always_inline)) void do_block_naive(
 
 // use AVX2 to calculate C += or = A * B, n >= BLOCK_SIZE_N, row major
 static inline __attribute__((always_inline)) void do_block_simd(
-    int lda, int ldb, int ldc, int M, int N, int K, double *__restrict__ A,
-    double *__restrict__ B, double *__restrict__ C, bool override) {
+    int lda, int ldb, int ldc, int M, int N, int K, const double *__restrict__ const A,
+    const double *__restrict__ const B, double *__restrict__ const C, bool override) {
 
 #if !ENABLE_STRASSEN
   // should not use override when Strassen is not used
@@ -303,12 +303,12 @@ static double A_buf[MAX_N * MAX_N], B_buf[MAX_N * MAX_N], C_buf[MAX_N * MAX_N];
  *  C := C + A * B
  * where A, B, and C are lda-by-lda matrices stored in column-major format.
  * On exit, A and B maintain their input values. */
-void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
+void square_dgemm(int lda, const double *__restrict__ A, const double *__restrict__ B,
                   double *__restrict__ C) {
 
   // (A*B)^T = B^T * A^T, so we can treat A, B, C in row-major format and
   // calculate C = C + B * A swap A and B for simplicity
-  double *temp = A;
+  const double *__restrict__ temp = A;
   A = B;
   B = temp;
 
@@ -325,12 +325,12 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
     dim = (lda / PADDING_DIM + 1) * PADDING_DIM;
 #pragma ivdep
     for (int i = 0; i < whole_width; ++i) {
-      double *__restrict__ A_buf_pos = A_buf + i * MAX_N + whole_width;
-      double *__restrict__ B_buf_pos = B_buf + i * MAX_N + whole_width;
-      double *__restrict__ C_buf_pos = C_buf + i * MAX_N + whole_width;
-      double *__restrict__ A_pos = A + i * lda + whole_width;
-      double *__restrict__ B_pos = B + i * lda + whole_width;
-      double *__restrict__ C_pos = C + i * lda + whole_width;
+      double *__restrict__ const A_buf_pos = A_buf + i * MAX_N + whole_width;
+      double *__restrict__ const B_buf_pos = B_buf + i * MAX_N + whole_width;
+      double *__restrict__ const C_buf_pos = C_buf + i * MAX_N + whole_width;
+      const double *__restrict__ const A_pos = A + i * lda + whole_width;
+      const double *__restrict__ const B_pos = B + i * lda + whole_width;
+      const double *__restrict__ const C_pos = C + i * lda + whole_width;
       __builtin_prefetch(A_buf_pos, 1);
       __builtin_prefetch(B_buf_pos, 1);
       __builtin_prefetch(C_buf_pos, 1);
@@ -343,12 +343,12 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
     }
 #pragma ivdep
     for (int i = whole_width; i < lda; ++i) {
-      double *__restrict__ A_buf_pos = A_buf + i * MAX_N;
-      double *__restrict__ B_buf_pos = B_buf + i * MAX_N;
-      double *__restrict__ C_buf_pos = C_buf + i * MAX_N;
-      double *__restrict__ A_pos = A + i * lda;
-      double *__restrict__ B_pos = B + i * lda;
-      double *__restrict__ C_pos = C + i * lda;
+      double *__restrict__ const A_buf_pos = A_buf + i * MAX_N;
+      double *__restrict__ const B_buf_pos = B_buf + i * MAX_N;
+      double *__restrict__ const C_buf_pos = C_buf + i * MAX_N;
+      const double *__restrict__ const A_pos = A + i * lda;
+      const double *__restrict__ const B_pos = B + i * lda;
+      const double *__restrict__ const C_pos = C + i * lda;
       __builtin_prefetch(A_buf_pos, 1);
       __builtin_prefetch(B_buf_pos, 1);
       __builtin_prefetch(C_buf_pos, 1);
@@ -396,9 +396,9 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
             int stride_a = (i < whole_width && k < whole_width) ? lda : MAX_N;
             int stride_b = (k < whole_width && j < whole_width) ? lda : MAX_N;
             int stride_c = (i < whole_width && j < whole_width) ? lda : MAX_N;
-            double *__restrict__ A_ = (i < whole_width && k < whole_width) ? A : A_buf;
-            double *__restrict__ B_ = (k < whole_width && j < whole_width) ? B : B_buf;
-            double *__restrict__ C_ = (i < whole_width && j < whole_width) ? C : C_buf;
+            const double *__restrict__ const A_ = (i < whole_width && k < whole_width) ? A : A_buf;
+            const double *__restrict__ const B_ = (k < whole_width && j < whole_width) ? B : B_buf;
+            double *__restrict__ const C_ = (i < whole_width && j < whole_width) ? C : C_buf;
 #pragma forceinline
             do_block_simd(stride_a, stride_b, stride_c, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, A_ + i * stride_a + k, B_ + k * stride_b + j,
                 C_ + i * stride_c + j, false);
@@ -418,38 +418,14 @@ void square_dgemm(int lda, double *__restrict__ A, double *__restrict__ B,
   if (pad) {
 #pragma ivdep
     for (int i = 0; i < whole_width; ++i) {
-      double *__restrict__ A_buf_pos = A_buf + i * MAX_N + whole_width;
-      double *__restrict__ B_buf_pos = B_buf + i * MAX_N + whole_width;
-      double *__restrict__ C_buf_pos = C_buf + i * MAX_N + whole_width;
-      double *__restrict__ A_pos = A + i * lda + whole_width;
-      double *__restrict__ B_pos = B + i * lda + whole_width;
-      double *__restrict__ C_pos = C + i * lda + whole_width;
-      __builtin_prefetch(A_buf_pos, 0);
-      __builtin_prefetch(B_buf_pos, 0);
-      __builtin_prefetch(C_buf_pos, 0);
-      __builtin_prefetch(A_pos, 1);
-      __builtin_prefetch(B_pos, 1);
-      __builtin_prefetch(C_pos, 1);
-      memcpy(A_pos, A_buf_pos, sizeof(double) * remain);
-      memcpy(B_pos, B_buf_pos, sizeof(double) * remain);
+      const double *__restrict__ const C_buf_pos = C_buf + i * MAX_N + whole_width;
+      double *__restrict__ const C_pos = C + i * lda + whole_width;
       memcpy(C_pos, C_buf_pos, sizeof(double) * remain);
     }
 #pragma ivdep
     for (int i = whole_width; i < lda; ++i) {
-      double *__restrict__ A_buf_pos = A_buf + i * MAX_N;
-      double *__restrict__ B_buf_pos = B_buf + i * MAX_N;
-      double *__restrict__ C_buf_pos = C_buf + i * MAX_N;
-      double *__restrict__ A_pos = A + i * lda;
-      double *__restrict__ B_pos = B + i * lda;
-      double *__restrict__ C_pos = C + i * lda;
-      __builtin_prefetch(A_buf_pos, 0);
-      __builtin_prefetch(B_buf_pos, 0);
-      __builtin_prefetch(C_buf_pos, 0);
-      __builtin_prefetch(A_pos, 1);
-      __builtin_prefetch(B_pos, 1);
-      __builtin_prefetch(C_pos, 1);
-      memcpy(A_pos, A_buf_pos, sizeof(double) * lda);
-      memcpy(B_pos, B_buf_pos, sizeof(double) * lda);
+      const double *__restrict__ const C_buf_pos = C_buf + i * MAX_N;
+      double *__restrict__ const C_pos = C + i * lda;
       memcpy(C_pos, C_buf_pos, sizeof(double) * lda);
     }
   }
