@@ -197,11 +197,12 @@ __attribute__((constructor)) void bind_core() {
   cpu_set_t set;
   CPU_ZERO(&set);
   CPU_SET(1, &set);
-  // sched_setaffinity(0, sizeof(set), &set);
-  posix_memalign((void **)&A_buf, 64, MAX_N * MAX_N * sizeof(double));
-  posix_memalign((void **)&B_buf, 64, MAX_N * MAX_N * sizeof(double));
-  posix_memalign((void **)&C_buf, 64, MAX_N * MAX_N * sizeof(double));
-  bzero(A_buf, sizeof(A_buf));
-  bzero(B_buf, sizeof(B_buf));
-  bzero(C_buf, sizeof(C_buf));
+  sched_setaffinity(0, sizeof(set), &set);
+  size_t buf_size = MAX_N * MAX_N * sizeof(double);
+  posix_memalign((void **)&A_buf, 64, buf_size);
+  posix_memalign((void **)&B_buf, 64, buf_size);
+  posix_memalign((void **)&C_buf, 64, buf_size);
+  bzero(A_buf, buf_size);
+  bzero(B_buf, buf_size);
+  bzero(C_buf, buf_size);
 }
