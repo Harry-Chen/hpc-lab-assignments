@@ -2,8 +2,8 @@
 # This makefile is intended for the Intel C compiler.
 # Your code must compile (with icc) with the given CFLAGS. You may experiment with the OPT variable to invoke additional compiler options.
 
-CC = icc
-OPT = -fast -ipo -g
+CC = ./icc-wrapper
+OPT = -fast -xHost -Ofast -ffast-math -ip -ipo -g
 CFLAGS = -Wall -DGETTIMEOFDAY -std=c99 $(OPT)
 LDFLAGS = -Wall
 # mkl is needed for blas implementation

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+ONEAPI=/opt/intel/inteloneapi/setvars.sh
+
+if [ -f $ONEAPI ]; then
+	source $ONEAPI &>/dev/null
+fi
+
+exec icc $*
+
