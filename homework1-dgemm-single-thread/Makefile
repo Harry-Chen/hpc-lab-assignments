@@ -35,7 +35,9 @@ benchmark-blas: benchmark.o dgemm-blas.o
 # for Strassen
 benchmark-strassen : benchmark-strassen.o dgemm-strassen.o
 	$(CC) -o $@ $^ $(LDLIBS)
-dgemm-strassen.o: dgemm-blocked.c
+dgemm-blocked.o: dgemm-blocked.c dgemm-blocked-block-kernel.c
+	$(CC) -c $(CFLAGS) -o $@ $<
+dgemm-strassen.o: dgemm-blocked.c dgemm-blocked-strassen-kernel.h
 	$(CC) -c $(CFLAGS) -DENABLE_STRASSEN=1 -o $@ $<
 benchmark-strassen.o: benchmark.c
 	$(CC) -c $(CFLAGS) -DENABLE_STRASSEN=1 -o $@ $<

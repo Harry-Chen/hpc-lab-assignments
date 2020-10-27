@@ -197,7 +197,7 @@ __attribute__((constructor)) void bind_core() {
   cpu_set_t set;
   CPU_ZERO(&set);
   CPU_SET(1, &set);
-  sched_setaffinity(0, sizeof(set), &set);
+  // sched_setaffinity(0, sizeof(set), &set);
   posix_memalign((void **)&A_buf, 64, MAX_N * MAX_N * sizeof(double));
   posix_memalign((void **)&B_buf, 64, MAX_N * MAX_N * sizeof(double));
   posix_memalign((void **)&C_buf, 64, MAX_N * MAX_N * sizeof(double));
