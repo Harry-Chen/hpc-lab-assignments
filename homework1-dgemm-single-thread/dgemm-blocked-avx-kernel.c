@@ -9,7 +9,7 @@
 #define UNROLL (BLOCK_SIZE_N / 4)
 
 
-// use AVX2 to calculate C += or = A * B, n >= BLOCK_SIZE_N, row major
+// use AVX2 to calculate C += or = A * B, row major
 static inline __attribute__((always_inline)) void AVX_KERNEL_NAME(
     int lda, int ldb, int ldc, const double *__restrict__ const A,
     const double *__restrict__ const B, double *__restrict__ const C, bool override) {
@@ -24,8 +24,8 @@ static inline __attribute__((always_inline)) void AVX_KERNEL_NAME(
   // copy whole A to cache
   static double A_block[BLOCK_SIZE_M * BLOCK_SIZE_K];
 
-  for (int i = 0; i < BLOCK_SIZE_K; ++i) {
-    memcpy(A_block + i * BLOCK_SIZE_M, A + i * lda, sizeof(double) * BLOCK_SIZE_M);
+  for (int i = 0; i < BLOCK_SIZE_M; ++i) {
+    memcpy(A_block + i * BLOCK_SIZE_K, A + i * lda, sizeof(double) * BLOCK_SIZE_K);
   }
 
   // calculate using AVX intrinsics
@@ -55,7 +55,7 @@ static inline __attribute__((always_inline)) void AVX_KERNEL_NAME(
           //     _mm256_fmadd_pd(_mm256_load_pd(B + k * lda + j + x * 4),
           //                     _mm256_broadcast_sd(A + i * lda + k), ymm[x]);
           ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(_mm256_loadu_pd(B + k * ldb + j + x * 4),
-                              _mm256_broadcast_sd(A_block + i * BLOCK_SIZE_N + k)));
+                              _mm256_broadcast_sd(A_block + i * BLOCK_SIZE_K + k)));
         }
       }
 

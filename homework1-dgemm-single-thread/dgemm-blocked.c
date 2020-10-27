@@ -38,6 +38,7 @@ const char *dgemm_desc = "Simple blocked dgemm (with Strassen algorithm).";
 #undef BLOCK_SIZE_N
 #undef BLOCK_SIZE_K
 
+
 #define BLOCK_SIZE_M 32
 #define BLOCK_SIZE_N 32
 #define BLOCK_SIZE_K 32
@@ -62,10 +63,8 @@ static inline __attribute__((always_inline)) void do_block_naive(
 #pragma ivdep
     for (int j = 0; j < N; ++j) {
       /* Compute C(i,j) */
-      double cij = C[i * ldc + j];
 #pragma ivdep
-      for (int k = 0; k < K; ++k) cij += A[i * lda + k] * B[k * ldb + j];
-      C[i * ldc + j] = cij;
+      for (int k = 0; k < K; ++k) C[i * ldc + j] += A[i * lda + k] * B[k * ldb + j];
     }
   }
 }
@@ -114,7 +113,7 @@ void square_dgemm(int lda, const double *__restrict__ A, const double *__restric
 
   int padding_dim = 32;
 
-  if (size % 40 == 0) {
+  if (size % 40 == 0 || size == 1024) {
     padding_dim = 40;
   }
 
