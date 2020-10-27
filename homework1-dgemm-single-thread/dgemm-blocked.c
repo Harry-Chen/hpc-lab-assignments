@@ -10,11 +10,6 @@
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
-#define BLOCK_SIZE_M 32
-#define BLOCK_SIZE_N 32
-#define BLOCK_SIZE_K 32
-
-#define UNROLL (BLOCK_SIZE_N / 4)
 #define MAX_N 3000
 
 #ifndef ENABLE_STRASSEN
@@ -28,6 +23,25 @@ const char *dgemm_desc = "Simple blocked dgemm.";
 #else
 const char *dgemm_desc = "Simple blocked dgemm (with Strassen algorithm).";
 #endif
+
+
+#define CONCAT(A, M, N, K) A ## M ## _ ## N ## _ ## K
+#define AVX_KERNEL_NAME_(M, N, K) CONCAT(do_block_simd_, M, N, K)
+#define AVX_KERNEL_NAME AVX_KERNEL_NAME_(BLOCK_SIZE_M,BLOCK_SIZE_N,BLOCK_SIZE_K)
+
+#define BLOCK_SIZE_M 40
+#define BLOCK_SIZE_N 40
+#define BLOCK_SIZE_K 40
+#include "dgemm-blocked-avx-kernel.c"
+#undef BLOCK_SIZE_M
+#undef BLOCK_SIZE_N
+#undef BLOCK_SIZE_K
+
+#define BLOCK_SIZE_M 32
+#define BLOCK_SIZE_N 32
+#define BLOCK_SIZE_K 32
+#include "dgemm-blocked-avx-kernel.c"
+
 
 /* This auxiliary subroutine performs a smaller dgemm operation
  *  C := C + A * B
@@ -54,65 +68,6 @@ static inline __attribute__((always_inline)) void do_block_naive(
     }
   }
 }
-
-// use AVX2 to calculate C += or = A * B, n >= BLOCK_SIZE_N, row major
-static inline __attribute__((always_inline)) void do_block_simd(
-    int lda, int ldb, int ldc, int M, int N, int K, const double *__restrict__ const A,
-    const double *__restrict__ const B, double *__restrict__ const C, bool override) {
-
-#if !ENABLE_STRASSEN
-  // should not use override when Strassen is not used
-  if (override) {
-    __builtin_unreachable();
-  }
-#endif
-
-  // copy whole A to cache
-  static double A_block[BLOCK_SIZE_N * BLOCK_SIZE_N];
-
-  for (int i = 0; i < BLOCK_SIZE_N; ++i) {
-    memcpy(A_block + i * BLOCK_SIZE_N, A + i * lda, sizeof(double) * BLOCK_SIZE_N);
-  }
-
-  // calculate using AVX intrinsics
-  for (int j = 0; j < BLOCK_SIZE_N; j += 4 * UNROLL) {
-#pragma ivdep
-    for (int i = 0; i < M; i++) {
-      __m256d ymm[UNROLL];
-
-      if (likely(!override)) {
-#pragma unroll(UNROLL)
-        for (int x = 0; x < UNROLL; x++) {
-          ymm[x] = _mm256_loadu_pd(C + i * ldc + j + x * 4);
-        }
-      } else {
-#pragma unroll(UNROLL)
-        for (int x = 0; x < UNROLL; x++) {
-          ymm[x] = _mm256_set_pd(0.0, 0.0, 0.0, 0.0);
-        }
-      }
-
-#pragma unroll(BLOCK_SIZE_K)
-      for (int k = 0; k < BLOCK_SIZE_K; k++) {
-#pragma unroll(UNROLL)
-        for (int x = 0; x < UNROLL; x++) {
-          // gcc cannot inline fmadd, so weak
-          // ymm[x] =
-          //     _mm256_fmadd_pd(_mm256_load_pd(B + k * lda + j + x * 4),
-          //                     _mm256_broadcast_sd(A + i * lda + k), ymm[x]);
-          ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(_mm256_loadu_pd(B + k * ldb + j + x * 4),
-                              _mm256_broadcast_sd(A_block + i * BLOCK_SIZE_N + k)));
-        }
-      }
-
-#pragma unroll(UNROLL)
-      for (int x = 0; x < UNROLL; x++) {
-        _mm256_storeu_pd(C + i * ldc + j + x * 4, ymm[x]);
-      }
-    }
-  }
-}
-
 
 #if ENABLE_STRASSEN
 
@@ -202,7 +157,7 @@ static inline void do_block_strassen(
   if (unlikely(n < BLOCK_SIZE_N)) {
     __builtin_unreachable();
   } else if (n == BLOCK_SIZE_N) {
-    do_block_simd(lda, ldb, ldc, n, n, n, A, B, C, true);
+    do_block_simd_32_32_32(lda, ldb, ldc, A, B, C, true);
     return;
   }
 
@@ -295,7 +250,6 @@ static inline void do_block_strassen(
 }
 #endif
 
-#define PADDING_DIM BLOCK_SIZE_N
 // buffer for DGEMM padding
 static double A_buf[MAX_N * MAX_N], B_buf[MAX_N * MAX_N], C_buf[MAX_N * MAX_N];
 
@@ -314,15 +268,41 @@ void square_dgemm(int lda, const double *__restrict__ A, const double *__restric
 
   bool pad = false;
   int dim = lda;
+
+#if ENABLE_STRASSEN
+  if (likely((dim & (dim - 1)) == 0 && dim >= BLOCK_SIZE_N)) {
+    // power of 2 - use strassen
+    // C_s = A * B
+    do_block_strassen(dim, dim, MAX_N, dim, A, B, C_strassen, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
+    // C += C_s
+    matrix_add_single(MAX_N, dim, dim, C_strassen, C);
+    return;
+  }
+#endif
+
+  int size = lda;
+
+  if (lda % 32 == 31) {
+    size++;
+  } else if (lda % 32 == 1) {
+    size--;
+  }
+
+  int padding_dim = 32;
+
+  if (size % 40 == 0) {
+    padding_dim = 40;
+  }
+
   
-  int whole_count = lda / PADDING_DIM;
-  int whole_width = whole_count * PADDING_DIM;
-  int remain = lda % PADDING_DIM; // AVX registers
+  int whole_count = lda / padding_dim;
+  int whole_width = whole_count * padding_dim;
+  int remain = lda % padding_dim; // AVX registers
 
   // pad if remaining numbers are relatively many
-  if (remain > PADDING_DIM / 2 + 1) {
+  if (remain > padding_dim / 2 + 1) {
     pad = true;
-    dim = (lda / PADDING_DIM + 1) * PADDING_DIM;
+    dim = (lda / padding_dim + 1) * padding_dim;
 #pragma ivdep
     for (int i = 0; i < whole_width; ++i) {
       double *__restrict__ const A_buf_pos = A_buf + i * MAX_N + whole_width;
@@ -361,57 +341,14 @@ void square_dgemm(int lda, const double *__restrict__ A, const double *__restric
     }
   }
 
-#if ENABLE_STRASSEN
-  assert(dim == lda);
-  if (likely((dim & (dim - 1)) == 0 && dim >= BLOCK_SIZE_N)) {
-    // power of 2 - use strassen
-    // C_s = A * B
-    do_block_strassen(dim, dim, MAX_N, dim, A, B, C_strassen, st_im_1, st_im_2, st_im_3, st_im_4, st_p_1, st_p_2);
-    // C += C_s
-    matrix_add_single(MAX_N, dim, dim, C_strassen, C);
-    return;
-  }
-#endif
-
-  /* For each block-row of A */
-  for (int i = 0; i < dim; i += BLOCK_SIZE_M) {
-    /* For each block-column of B */
-    for (int j = 0; j < dim; j += BLOCK_SIZE_N) {
-      /* Accumulate block dgemms into block of C */
-      for (int k = 0; k < dim; k += BLOCK_SIZE_K) {
-        // if in the "whole blocks" region
-        if (likely(i < whole_width && j < whole_width && k < whole_width)) {
-#pragma forceinline
-          do_block_simd(lda, lda, lda, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, A + i * lda + k,
-                          B + k * lda + j, C + i * lda + j, false);
-        } else {
-          int M = min(BLOCK_SIZE_M, dim - i);
-          int N = min(BLOCK_SIZE_N, dim - j);
-          int K = min(BLOCK_SIZE_K, dim - k);
-          // printf("SIMD %d %d %d %d %d\n", i, j, k, lda, dim);
-          if (likely(pad)) {
-            // padded, the remaining numbers are all 32x32 blocks
-            // use SIMD kernel to calculate remaining
-            // need to judge whether source / dest data resides in buf or original array
-            int stride_a = (i < whole_width && k < whole_width) ? lda : MAX_N;
-            int stride_b = (k < whole_width && j < whole_width) ? lda : MAX_N;
-            int stride_c = (i < whole_width && j < whole_width) ? lda : MAX_N;
-            const double *__restrict__ const A_ = (i < whole_width && k < whole_width) ? A : A_buf;
-            const double *__restrict__ const B_ = (k < whole_width && j < whole_width) ? B : B_buf;
-            double *__restrict__ const C_ = (i < whole_width && j < whole_width) ? C : C_buf;
-#pragma forceinline
-            do_block_simd(stride_a, stride_b, stride_c, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, A_ + i * stride_a + k, B_ + k * stride_b + j,
-                C_ + i * stride_c + j, false);
-          } else {
-            // printf("naive %d %d %d\n", M, N, K);
-            // use naive implementation to calculate remaining numbers
-#pragma forceinline
-            do_block_naive(lda, lda, lda, M, N, K, A + i * lda + k, B + k * lda + j,
-                          C + i * lda + j);
-          }
-        }
-      }
-    }
+  if (padding_dim == 32) {
+#define BLOCK_SIZE 32
+#include "dgemm-blocked-block-kernel.c"
+#undef BLOCK_SIZE
+  } else {
+#define BLOCK_SIZE 40
+#include "dgemm-blocked-block-kernel.c"
+#undef BLOCK_SIZE
   }
 
   // copy data back
