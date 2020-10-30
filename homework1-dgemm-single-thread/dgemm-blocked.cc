@@ -10,7 +10,7 @@
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
-#define MAX_N 3000
+#define MAX_N 2500
 
 #ifndef ENABLE_STRASSEN
 #define ENABLE_STRASSEN 0
@@ -186,7 +186,7 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
 
   int padding_dim = 32;
 
-  if (size % 40 == 0 || size % 512 == 0) {
+  if (size % 40 == 0) {
     padding_dim = 40;
   }
 
@@ -207,11 +207,9 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
       const double *__restrict__ const A_pos = A + i * lda + whole_width;
       const double *__restrict__ const B_pos = B + i * lda + whole_width;
       const double *__restrict__ const C_pos = C + i * lda + whole_width;
-      __builtin_prefetch(A_buf_pos, 1);
       __builtin_prefetch(B_buf_pos, 1);
-      __builtin_prefetch(C_buf_pos, 1);
-      __builtin_prefetch(A_pos, 0);
       __builtin_prefetch(B_pos, 0);
+      __builtin_prefetch(C_buf_pos, 1);
       __builtin_prefetch(C_pos, 0);
       memcpy(A_buf_pos, A_pos, sizeof(double) * remain);
       memcpy(B_buf_pos, B_pos, sizeof(double) * remain);
@@ -225,11 +223,9 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
       const double *__restrict__ const A_pos = A + i * lda;
       const double *__restrict__ const B_pos = B + i * lda;
       const double *__restrict__ const C_pos = C + i * lda;
-      __builtin_prefetch(A_buf_pos, 1);
       __builtin_prefetch(B_buf_pos, 1);
-      __builtin_prefetch(C_buf_pos, 1);
-      __builtin_prefetch(A_pos, 0);
       __builtin_prefetch(B_pos, 0);
+      __builtin_prefetch(C_buf_pos, 1);
       __builtin_prefetch(C_pos, 0);
       memcpy(A_buf_pos, A_pos, sizeof(double) * lda);
       memcpy(B_buf_pos, B_pos, sizeof(double) * lda);
@@ -251,12 +247,16 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
     for (int i = 0; i < whole_width; ++i) {
       const double *__restrict__ const C_buf_pos = C_buf + i * MAX_N + whole_width;
       double *__restrict__ const C_pos = C + i * lda + whole_width;
+      __builtin_prefetch(C_buf_pos + MAX_N, 0);
+      __builtin_prefetch(C_pos + lda, 1);
       memcpy(C_pos, C_buf_pos, sizeof(double) * remain);
     }
 #pragma ivdep
     for (int i = whole_width; i < lda; ++i) {
       const double *__restrict__ const C_buf_pos = C_buf + i * MAX_N;
       double *__restrict__ const C_pos = C + i * lda;
+      __builtin_prefetch(C_buf_pos + MAX_N, 0);
+      __builtin_prefetch(C_pos + lda, 1);
       memcpy(C_pos, C_buf_pos, sizeof(double) * lda);
     }
   }
