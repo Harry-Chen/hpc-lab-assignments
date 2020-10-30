@@ -26,17 +26,10 @@ const char *dgemm_desc = "Simple blocked dgemm (with Strassen algorithm).";
 
 
 // use AVX2 to calculate C += or = A * B, row major
-template<int M, int N = M, int K = M, int UNROLL = N / 4>
+template<bool override, int M, int N = M, int K = M, int UNROLL = N / 4>
 static inline __attribute__((always_inline)) void avx_kernel(
     int lda, int ldb, int ldc, const double *__restrict__ const A,
-    const double *__restrict__ const B, double *__restrict__ const C, bool override) {
-
-#if !ENABLE_STRASSEN
-  // should not use override when Strassen is not used
-  if (override) {
-    __builtin_unreachable();
-  }
-#endif
+    const double *__restrict__ const B, double *__restrict__ const C) {
 
   // copy whole A to cache
   static double A_block[M * K];
@@ -50,18 +43,14 @@ static inline __attribute__((always_inline)) void avx_kernel(
 #pragma ivdep
     for (int i = 0; i < M; i++) {
       __m256d ymm[UNROLL];
-
-      if (likely(!override)) {
 #pragma unroll(UNROLL)
         for (int x = 0; x < UNROLL; x++) {
-          ymm[x] = _mm256_loadu_pd(C + i * ldc + j + x * 4);
+          if constexpr (override) {
+            ymm[x] = _mm256_setzero_pd();
+          } else {
+            ymm[x] = _mm256_loadu_pd(C + i * ldc + j + x * 4);
+          }
         }
-      } else {
-#pragma unroll(UNROLL)
-        for (int x = 0; x < UNROLL; x++) {
-          ymm[x] = _mm256_set_pd(0.0, 0.0, 0.0, 0.0);
-        }
-      }
 
 #pragma unroll(K)
       for (int k = 0; k < K; k++) {
@@ -114,7 +103,7 @@ double *A_buf, *B_buf, *C_buf;
 
 template <int BLOCK_SIZE_M, int BLOCK_SIZE_N = BLOCK_SIZE_M, int BLOCK_SIZE_K = BLOCK_SIZE_M>
 static inline __attribute__((always_inline)) void do_block_simd(bool pad, int dim, int whole_width, int lda, const double *__restrict__ const A,
-    const double *__restrict__ const B, double *__restrict__ const C, bool override) {
+    const double *__restrict__ const B, double *__restrict__ const C) {
   /* For each block-row of A */
   for (int i = 0; i < dim; i += BLOCK_SIZE_M) {
     /* For each block-column of B */
@@ -124,7 +113,7 @@ static inline __attribute__((always_inline)) void do_block_simd(bool pad, int di
         // if in the "whole blocks" region
         if (likely(i < whole_width && j < whole_width && k < whole_width)) {
 #pragma forceinline
-          avx_kernel<BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j, false);
+          avx_kernel<false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
         } else {
           int M = min(BLOCK_SIZE_M, dim - i);
           int N = min(BLOCK_SIZE_N, dim - j);
@@ -141,8 +130,8 @@ static inline __attribute__((always_inline)) void do_block_simd(bool pad, int di
             const double *__restrict__ const B_ = (k < whole_width && j < whole_width) ? B : B_buf;
             double *__restrict__ const C_ = (i < whole_width && j < whole_width) ? C : C_buf;
 #pragma forceinline
-            avx_kernel<BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(stride_a, stride_b, stride_c, A_ + i * stride_a + k, B_ + k * stride_b + j,
-                C_ + i * stride_c + j, false);
+            avx_kernel<false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(stride_a, stride_b, stride_c, A_ + i * stride_a + k, B_ + k * stride_b + j,
+                C_ + i * stride_c + j);
           } else {
             // printf("naive %d %d %d\n", M, N, K);
             // use naive implementation to calculate remaining numbers
@@ -165,7 +154,7 @@ static inline __attribute__((always_inline)) void do_block_simd(bool pad, int di
  * where A, B, and C are lda-by-lda matrices stored in column-major format.
  * On exit, A and B maintain their input values. */
 extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double *__restrict__ B,
-                  double *__restrict__ C) {
+                  double *__restrict__ const C) {
 
   // (A*B)^T = B^T * A^T, so we can treat A, B, C in row-major format and
   // calculate C = C + B * A swap A and B for simplicity
@@ -249,9 +238,9 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   }
 
   if (padding_dim == 32) {
-    do_block_simd<32>(pad, dim, whole_width, lda, A, B, C, false);
+    do_block_simd<32>(pad, dim, whole_width, lda, A, B, C);
   } else if (padding_dim == 40) {
-    do_block_simd<40>(pad, dim, whole_width, lda, A, B, C, false);
+    do_block_simd<40>(pad, dim, whole_width, lda, A, B, C);
   } else {
     __builtin_unreachable();
   }
