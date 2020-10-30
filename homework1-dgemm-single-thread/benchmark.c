@@ -108,7 +108,7 @@ int main (int argc, char **argv)
 
   /* allocate memory for all problems */
   double* buf = NULL;
-  buf = (double*) malloc (3 * nmax * nmax * sizeof(double));
+  posix_memalign((void **) &buf, 64, 3 * nmax * nmax * sizeof(double));
   if (buf == NULL) die ("failed to allocate largest problem size");
 
   /* For each test size */

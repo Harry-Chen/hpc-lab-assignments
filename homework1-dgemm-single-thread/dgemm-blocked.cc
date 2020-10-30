@@ -176,11 +176,7 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
 
 
   // if everything is aligned, we can use the aligned kernel!
-  bool aligned = false;
-  if ((size_t) A & 0b11111 == 0 && (size_t) B & 0b11111 == 0 && (size_t) C & 0b11111 == 0 && lda % 4 == 0) {
-    aligned = true;
-  }
-
+  bool aligned = (size_t) A & 0b11111 == 0 && (size_t) B & 0b11111 == 0 && (size_t) C & 0b11111 == 0 && lda % 4 == 0;
 
   bool pad = false;
   int dim = lda;
