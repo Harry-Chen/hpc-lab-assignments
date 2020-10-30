@@ -26,12 +26,12 @@ const char *dgemm_desc = "Simple blocked dgemm (with Strassen algorithm).";
 
 
 // use AVX2 to calculate C += or = A * B, row major
-template<bool override, int M, int N = M, int K = M, int UNROLL = N / 4>
+template<bool aligned, bool override, int M, int N = M, int K = M, int UNROLL = N / 4>
 static inline __attribute__((always_inline)) void avx_kernel(
     int lda, int ldb, int ldc, const double *__restrict__ const A,
     const double *__restrict__ const B, double *__restrict__ const C) {
 
-  // copy whole A to cache
+  // copy whole A to L1
   static double A_block[M * K];
 
   for (int i = 0; i < M; ++i) {
@@ -47,8 +47,10 @@ static inline __attribute__((always_inline)) void avx_kernel(
         for (int x = 0; x < UNROLL; x++) {
           if constexpr (override) {
             ymm[x] = _mm256_setzero_pd();
-          } else {
+          } else if constexpr (aligned) {
             ymm[x] = _mm256_loadu_pd(C + i * ldc + j + x * 4);
+          } else {
+            ymm[x] = _mm256_load_pd(C + i * ldc + j + x * 4);
           }
         }
 
@@ -60,14 +62,24 @@ static inline __attribute__((always_inline)) void avx_kernel(
           // ymm[x] =
           //     _mm256_fmadd_pd(_mm256_load_pd(B + k * lda + j + x * 4),
           //                     _mm256_broadcast_sd(A + i * lda + k), ymm[x]);
-          ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(_mm256_loadu_pd(B + k * ldb + j + x * 4),
+          __m256d B_block;
+          if constexpr (aligned) {
+            B_block = _mm256_load_pd(B + k * ldb + j + x * 4);
+          } else {
+            B_block = _mm256_loadu_pd(B + k * ldb + j + x * 4);
+          }
+          ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(B_block,
                               _mm256_broadcast_sd(A_block + i * K + k)));
         }
       }
 
 #pragma unroll(UNROLL)
       for (int x = 0; x < UNROLL; x++) {
-        _mm256_storeu_pd(C + i * ldc + j + x * 4, ymm[x]);
+        if constexpr (aligned) {
+          _mm256_store_pd(C + i * ldc + j + x * 4, ymm[x]);
+        } else {
+          _mm256_storeu_pd(C + i * ldc + j + x * 4, ymm[x]);
+        }
       }
     }
   }
@@ -101,7 +113,7 @@ static inline __attribute__((always_inline)) void do_block_naive(
 // buffer for DGEMM padding
 double *A_buf, *B_buf, *C_buf;
 
-template <int BLOCK_SIZE_M, int BLOCK_SIZE_N = BLOCK_SIZE_M, int BLOCK_SIZE_K = BLOCK_SIZE_M>
+template <bool aligned, int BLOCK_SIZE_M, int BLOCK_SIZE_N = BLOCK_SIZE_M, int BLOCK_SIZE_K = BLOCK_SIZE_M>
 static inline __attribute__((always_inline)) void do_block_simd(bool pad, int dim, int whole_width, int lda, const double *__restrict__ const A,
     const double *__restrict__ const B, double *__restrict__ const C) {
   /* For each block-row of A */
@@ -113,7 +125,7 @@ static inline __attribute__((always_inline)) void do_block_simd(bool pad, int di
         // if in the "whole blocks" region
         if (likely(i < whole_width && j < whole_width && k < whole_width)) {
 #pragma forceinline
-          avx_kernel<false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
+          avx_kernel<aligned, false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
         } else {
           int M = min(BLOCK_SIZE_M, dim - i);
           int N = min(BLOCK_SIZE_N, dim - j);
@@ -130,7 +142,7 @@ static inline __attribute__((always_inline)) void do_block_simd(bool pad, int di
             const double *__restrict__ const B_ = (k < whole_width && j < whole_width) ? B : B_buf;
             double *__restrict__ const C_ = (i < whole_width && j < whole_width) ? C : C_buf;
 #pragma forceinline
-            avx_kernel<false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(stride_a, stride_b, stride_c, A_ + i * stride_a + k, B_ + k * stride_b + j,
+            avx_kernel<aligned, false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(stride_a, stride_b, stride_c, A_ + i * stride_a + k, B_ + k * stride_b + j,
                 C_ + i * stride_c + j);
           } else {
             // printf("naive %d %d %d\n", M, N, K);
@@ -161,6 +173,14 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   const double *__restrict__ temp = A;
   A = B;
   B = temp;
+
+
+  // if everything is aligned, we can use the aligned kernel!
+  bool aligned = false;
+  if ((size_t) A & 0b11111 == 0 && (size_t) B & 0b11111 == 0 && (size_t) C & 0b11111 == 0 && lda % 4 == 0) {
+    aligned = true;
+  }
+
 
   bool pad = false;
   int dim = lda;
@@ -234,9 +254,17 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   }
 
   if (padding_dim == 32) {
-    do_block_simd<32>(pad, dim, whole_width, lda, A, B, C);
+    if (aligned) {
+      do_block_simd<true, 32>(pad, dim, whole_width, lda, A, B, C);
+    } else {
+      do_block_simd<false, 32>(pad, dim, whole_width, lda, A, B, C);
+    }
   } else if (padding_dim == 40) {
-    do_block_simd<40>(pad, dim, whole_width, lda, A, B, C);
+    if (aligned) {
+      do_block_simd<true, 40>(pad, dim, whole_width, lda, A, B, C);
+    } else {
+      do_block_simd<false, 40>(pad, dim, whole_width, lda, A, B, C);
+    }
   } else {
     __builtin_unreachable();
   }
