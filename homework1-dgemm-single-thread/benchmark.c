@@ -146,7 +146,7 @@ int main (int argc, char **argv)
       seconds += wall_time();
 
       /*  compute Mflop/s rate */
-      Gflops_s = 2.e-9 * n_iterations * n * n * n / seconds;
+      Gflops_s = 2.0 * n * n * n * n_iterations * 1.0e-9 / seconds;
     }
     printf ("Size: %d\tGflop/s: %.3g (%d iter, %.3f seconds)\n", n, Gflops_s, n_iterations, seconds);
 

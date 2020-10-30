@@ -68,7 +68,7 @@ static inline __attribute__((always_inline)) void do_block_strassen(
   if (unlikely(n < BLOCK_SIZE_N)) {
     __builtin_unreachable();
   } else if (n == BLOCK_SIZE_N) {
-    avx_kernel<true, true, BLOCK_SIZE_N>(lda, ldb, ldc, A, B, C);
+    do_block_simd<true, true, BLOCK_SIZE_N>(lda, ldb, ldc, A, B, C);
     return;
   }
 

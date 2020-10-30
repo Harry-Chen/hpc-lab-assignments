@@ -17,6 +17,7 @@
 #endif
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
+#define max(a, b) (((a) > (b)) ? (a) : (b))
 
 #if !ENABLE_STRASSEN
 const char *dgemm_desc = "Simple blocked dgemm.";
@@ -27,7 +28,7 @@ const char *dgemm_desc = "Simple blocked dgemm (with Strassen algorithm).";
 
 // use AVX2 to calculate C += or = A * B, row major
 template<bool aligned, bool override, int M, int N = M, int K = M, int UNROLL = N / 4>
-static inline __attribute__((always_inline)) void avx_kernel(
+static inline __attribute__((always_inline)) void do_block_simd(
     int lda, int ldb, int ldc, const double *__restrict__ const A,
     const double *__restrict__ const B, double *__restrict__ const C) {
 
@@ -92,7 +93,7 @@ static inline __attribute__((always_inline)) void do_block_naive(
     /* For each column j of B */
     __builtin_prefetch(A + i * lda, 0);
     __builtin_prefetch(C + i * ldc, 1);
-#pragma ivdep
+#pragma vector vecremainder
     for (int j = 0; j < N; ++j) {
       /* Compute C(i,j) */
 #pragma ivdep
@@ -102,11 +103,13 @@ static inline __attribute__((always_inline)) void do_block_naive(
 }
 
 
-// buffer for DGEMM padding
+// buffers for DGEMM padding
 double *A_buf, *B_buf, *C_buf;
 
+
+// calculate square DGEMM with certain block size 
 template <bool aligned, int BLOCK_SIZE_M, int BLOCK_SIZE_N = BLOCK_SIZE_M, int BLOCK_SIZE_K = BLOCK_SIZE_M>
-static inline __attribute__((always_inline)) void do_block_simd(bool pad, int dim, int whole_width, int lda, const double *__restrict__ const A,
+static inline __attribute__((always_inline)) void square_gemm_simd(bool pad, int dim, int whole_width, int lda, const double *__restrict__ const A,
     const double *__restrict__ const B, double *__restrict__ const C) {
   /* For each block-row of A */
   for (int i = 0; i < dim; i += BLOCK_SIZE_M) {
@@ -117,7 +120,7 @@ static inline __attribute__((always_inline)) void do_block_simd(bool pad, int di
         // if in the "whole blocks" region
         if (likely(i < whole_width && j < whole_width && k < whole_width)) {
 #pragma forceinline
-          avx_kernel<aligned, false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
+          do_block_simd<aligned, false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
         } else {
           int M = min(BLOCK_SIZE_M, dim - i);
           int N = min(BLOCK_SIZE_N, dim - j);
@@ -134,7 +137,7 @@ static inline __attribute__((always_inline)) void do_block_simd(bool pad, int di
             const double *__restrict__ const B_ = (k < whole_width && j < whole_width) ? B : B_buf;
             double *__restrict__ const C_ = (i < whole_width && j < whole_width) ? C : C_buf;
 #pragma forceinline
-            avx_kernel<aligned, false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(stride_a, stride_b, stride_c, A_ + i * stride_a + k, B_ + k * stride_b + j,
+            do_block_simd<aligned, false, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K>(stride_a, stride_b, stride_c, A_ + i * stride_a + k, B_ + k * stride_b + j,
                 C_ + i * stride_c + j);
           } else {
             // printf("naive %d %d %d\n", M, N, K);
@@ -184,6 +187,7 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   }
 #endif
 
+  // round to power of 2
   int size = lda;
 
   if (lda % 32 == 31) {
@@ -192,6 +196,7 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
     size--;
   }
 
+  // block size if needed to pad
   int padding_dim = 32;
 
   if (size % 40 == 0) {
@@ -201,9 +206,10 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   
   int whole_count = lda / padding_dim;
   int whole_width = whole_count * padding_dim;
-  int remain = lda % padding_dim; // AVX registers
+  int remain = lda % padding_dim;
 
   // pad if remaining numbers are relatively many
+  // copy only numbers that are out of whole_width * whole_width
   if (remain > padding_dim / 2 + 1) {
     pad = true;
     dim = (lda / padding_dim + 1) * padding_dim;
@@ -241,23 +247,24 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
     }
   }
 
+  // use different kernels for different block size / alignments
   if (padding_dim == 32) {
     if (aligned) {
-      do_block_simd<true, 32>(pad, dim, whole_width, lda, A, B, C);
+      square_gemm_simd<true, 32>(pad, dim, whole_width, lda, A, B, C);
     } else {
-      do_block_simd<false, 32>(pad, dim, whole_width, lda, A, B, C);
+      square_gemm_simd<false, 32>(pad, dim, whole_width, lda, A, B, C);
     }
   } else if (padding_dim == 40) {
     if (aligned) {
-      do_block_simd<true, 40>(pad, dim, whole_width, lda, A, B, C);
+      square_gemm_simd<true, 40>(pad, dim, whole_width, lda, A, B, C);
     } else {
-      do_block_simd<false, 40>(pad, dim, whole_width, lda, A, B, C);
+      square_gemm_simd<false, 40>(pad, dim, whole_width, lda, A, B, C);
     }
   } else {
     __builtin_unreachable();
   }
 
-  // copy data back
+  // copy data back to original matrix (only modified part)
   if (pad) {
 #pragma ivdep
     for (int i = 0; i < whole_width; ++i) {
@@ -279,12 +286,15 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   
 }
 
-// bind this process to CPU 1
+
+// run before main()
 __attribute__((constructor)) void bind_core() {
+  // bind this process to CPU 1
   cpu_set_t set;
   CPU_ZERO(&set);
   CPU_SET(1, &set);
   sched_setaffinity(0, sizeof(set), &set);
+  // allocate aligned buffers and clear them
   size_t buf_size = MAX_N * MAX_N * sizeof(double);
   posix_memalign((void **)&A_buf, 64, buf_size);
   posix_memalign((void **)&B_buf, 64, buf_size);
