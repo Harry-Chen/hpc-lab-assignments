@@ -49,10 +49,8 @@ static inline __attribute__((always_inline)) void avx_kernel(
         for (int x = 0; x < UNROLL; x++) {
           if constexpr (override) {
             ymm[x] = _mm256_setzero_pd();
-          } else if constexpr (aligned) {
-            ymm[x] = _mm256_loadu_pd(C + i * ldc + j + x * 4);
           } else {
-            ymm[x] = _mm256_load_pd(C + i * ldc + j + x * 4);
+            ymm[x] = _mm256_loadu_pd(C + i * ldc + j + x * 4);
           }
         }
 
@@ -60,26 +58,20 @@ static inline __attribute__((always_inline)) void avx_kernel(
       for (int k = 0; k < K; k++) {
 #pragma unroll(UNROLL)
         for (int x = 0; x < UNROLL; x++) {
-          __m256d A_num, B_block;
+          auto B_block = _mm256_loadu_pd(B + k * ldb + j + x * 4);
+          __m256d A_num;
           if constexpr (aligned) {
-            B_block = _mm256_load_pd(B + k * ldb + j + x * 4);
             A_num = _mm256_broadcast_sd(A + i * lda + k);
           } else {
-            B_block = _mm256_loadu_pd(B + k * ldb + j + x * 4);
             A_num = _mm256_broadcast_sd(A_block + i * M + k);
           }
           ymm[x] = _mm256_fmadd_pd(A_num, B_block, ymm[x]);
-          // ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(A_num, B_block));
         }
       }
 
 #pragma unroll(UNROLL)
       for (int x = 0; x < UNROLL; x++) {
-        if constexpr (aligned) {
-          _mm256_store_pd(C + i * ldc + j + x * 4, ymm[x]);
-        } else {
-          _mm256_storeu_pd(C + i * ldc + j + x * 4, ymm[x]);
-        }
+        _mm256_storeu_pd(C + i * ldc + j + x * 4, ymm[x]);
       }
     }
   }
