@@ -34,8 +34,10 @@ static inline __attribute__((always_inline)) void avx_kernel(
   // copy whole A to L1
   static double A_block[M * K];
 
-  for (int i = 0; i < M; ++i) {
-    memcpy(A_block + i * K, A + i * lda, sizeof(double) * K);
+  if constexpr (!aligned) {
+    for (int i = 0; i < K; ++i) {
+      memcpy(A_block + i * M, A + i * lda, sizeof(double) * M);
+    }
   }
 
   // calculate using AVX intrinsics
@@ -58,18 +60,16 @@ static inline __attribute__((always_inline)) void avx_kernel(
       for (int k = 0; k < K; k++) {
 #pragma unroll(UNROLL)
         for (int x = 0; x < UNROLL; x++) {
-          // gcc cannot inline fmadd, so weak
-          // ymm[x] =
-          //     _mm256_fmadd_pd(_mm256_load_pd(B + k * lda + j + x * 4),
-          //                     _mm256_broadcast_sd(A + i * lda + k), ymm[x]);
-          __m256d B_block;
+          __m256d A_num, B_block;
           if constexpr (aligned) {
             B_block = _mm256_load_pd(B + k * ldb + j + x * 4);
+            A_num = _mm256_broadcast_sd(A + i * lda + k);
           } else {
             B_block = _mm256_loadu_pd(B + k * ldb + j + x * 4);
+            A_num = _mm256_broadcast_sd(A_block + i * M + k);
           }
-          ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(B_block,
-                              _mm256_broadcast_sd(A_block + i * K + k)));
+          ymm[x] = _mm256_fmadd_pd(A_num, B_block, ymm[x]);
+          // ymm[x] = _mm256_add_pd(ymm[x], _mm256_mul_pd(A_num, B_block));
         }
       }
 
