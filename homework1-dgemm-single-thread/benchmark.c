@@ -104,7 +104,7 @@ int main (int argc, char **argv)
   int nsizes = sizeof(test_sizes)/sizeof(test_sizes[0]);
 
   /* assume last size is also the largest size */
-  int nmax = test_sizes[nsizes-1];
+  int nmax = pow(2, ceil(log2(test_sizes[nsizes-1])));
 
   /* allocate memory for all problems */
   double* buf = NULL;
