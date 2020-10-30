@@ -6,5 +6,5 @@ if [ -f $ONEAPI ]; then
 	source $ONEAPI &>/dev/null
 fi
 
-exec icc $*
+exec $*
 

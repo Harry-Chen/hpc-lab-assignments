@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,8 +5,8 @@
 #include <strings.h>
 #include <mkl.h>
 
-extern const char* dgemm_desc;
-extern void square_dgemm (int, double*, double*, double*);
+extern "C" const char* dgemm_desc;
+extern "C" void square_dgemm (int, double*, double*, double*);
 
 int main(int argc, char *argv[]) {
     int dim = 4;
