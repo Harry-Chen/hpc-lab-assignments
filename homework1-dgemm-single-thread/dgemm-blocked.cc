@@ -36,8 +36,8 @@ static inline __attribute__((always_inline)) void do_block_simd(
   static double A_block[M * K];
 
   if constexpr (!aligned) {
-    for (int i = 0; i < K; ++i) {
-      memcpy(A_block + i * M, A + i * lda, sizeof(double) * M);
+    for (int i = 0; i < M; ++i) {
+      memcpy(A_block + i * K, A + i * lda, sizeof(double) * K);
     }
   }
 
@@ -64,7 +64,7 @@ static inline __attribute__((always_inline)) void do_block_simd(
           if constexpr (aligned) {
             A_num = _mm256_broadcast_sd(A + i * lda + k);
           } else {
-            A_num = _mm256_broadcast_sd(A_block + i * M + k);
+            A_num = _mm256_broadcast_sd(A_block + i * K + k);
           }
           ymm[x] = _mm256_fmadd_pd(A_num, B_block, ymm[x]);
         }
@@ -76,6 +76,62 @@ static inline __attribute__((always_inline)) void do_block_simd(
       }
     }
   }
+}
+
+template<int M, int K, int ROUND16 = K / 16, int ROUND8 = (K - ROUND16 * 16) / 8>
+static inline __attribute__((always_inline)) void do_block_simd_N_1(
+  int lda, int ldb, int ldc, const double *__restrict__ const A,
+    const double *__restrict__ const B, double *__restrict__ const C
+) {
+
+  static_assert(ROUND16 * 16 + ROUND8 * 8 == K);
+
+  // buffer to store B
+  __m256d y[K / 4];
+#pragma unroll(K / 4)
+  for (int i = 0; i < K; i += 4) {
+    y[i / 4] = _mm256_set_pd(B[(i + 3) * ldb], B[(i + 2) * ldb], B[(i + 1) * ldb], B[i * ldb]);
+  }
+
+  for (int i = 0; i < M; ++i) {
+
+    // interemdiate results
+    __m256d dot_product[2];
+
+#pragma unroll(ROUND16)
+    // do product of 16 numbers to 2 vectors
+    for (int x = 0; x < ROUND16; ++x) {
+      auto xy0 = _mm256_mul_pd(_mm256_loadu_pd(A + i * lda + x * 16 + 0), y[x * 4 + 0]);
+      auto xy1 = _mm256_mul_pd(_mm256_loadu_pd(A + i * lda + x * 16 + 4), y[x * 4 + 1]);
+      auto xy2 = _mm256_mul_pd(_mm256_loadu_pd(A + i * lda + x * 16 + 8), y[x * 4 + 2]);
+      auto xy3 = _mm256_mul_pd(_mm256_loadu_pd(A + i * lda + x * 16 + 12), y[x * 4 + 3]);
+      // low to high: xy00+xy01 xy10+xy11 xy02+xy03 xy12+xy13
+      auto temp01 = _mm256_hadd_pd(xy0, xy1);   
+      // low to high: xy20+xy21 xy30+xy31 xy22+xy23 xy32+xy33
+      auto temp23 = _mm256_hadd_pd(xy2, xy3);
+      // low to high: xy02+xy03 xy12+xy13 xy20+xy21 xy30+xy31
+      auto swapped = _mm256_permute2f128_pd(temp01, temp23, 0x21);
+      // low to high: xy00+xy01 xy10+xy11 xy22+xy23 xy32+xy33
+      auto blended = _mm256_blend_pd(temp01, temp23, 0b1100);
+      dot_product[x] = _mm256_add_pd(swapped, blended);
+    }
+    // accumalate product sums
+    auto sum = _mm256_hadd_pd(dot_product[0], dot_product[1]);
+    // add upper 128 bits of sum to its lower 128 bits
+    auto result = _mm_add_pd(_mm256_extractf128_pd(sum, 1), _mm256_castpd256_pd128(sum));
+    // do product of 8 numbers and accumulate to result
+
+#pragma unroll(ROUND8)
+    for (int k = ROUND16 * 16; k < K; k += 8) {
+      auto xy = _mm256_mul_pd(_mm256_loadu_pd(A + i * lda + k), y[k / 8 * 2]);
+      auto zw = _mm256_mul_pd(_mm256_loadu_pd(A + i * lda + k + 4), y[k / 8 * 2 + 1]);
+      auto temp = _mm256_hadd_pd(xy, zw);
+      auto product = _mm_add_pd(_mm256_castpd256_pd128(temp), _mm256_extractf128_pd(temp, 1));
+      result = _mm_add_pd(result, product);
+    }
+    C[i * lda] += ((double*)&result)[0] + ((double*)&result)[1];
+  }
+
 }
 
 /* This auxiliary subroutine performs a smaller dgemm operation
@@ -126,7 +182,7 @@ static inline __attribute__((always_inline)) void square_gemm_simd(bool pad, int
           int N = min(BLOCK_SIZE_N, dim - j);
           int K = min(BLOCK_SIZE_K, dim - k);
           // printf("SIMD %d %d %d %d %d\n", i, j, k, lda, dim);
-          if (likely(pad)) {
+          if (pad) {
             // padded, the remaining numbers are all M * N * K
             // use SIMD kernel to calculate remaining
             // need to judge whether source / dest data resides in buf or original array
@@ -141,10 +197,25 @@ static inline __attribute__((always_inline)) void square_gemm_simd(bool pad, int
                 C_ + i * stride_c + j);
           } else {
             // printf("naive %d %d %d\n", M, N, K);
-            // use naive implementation to calculate remaining numbers
+            // remaining large blocks
+            if constexpr (BLOCK_SIZE_N == 32) {
+              if (M == 1 && N == BLOCK_SIZE_N && K == BLOCK_SIZE_K) {
 #pragma forceinline
-            do_block_naive(lda, lda, lda, M, N, K, A + i * lda + k, B + k * lda + j,
-                          C + i * lda + j);
+                do_block_simd<aligned, false, 1, BLOCK_SIZE_N, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
+              } else if (M == BLOCK_SIZE_M && N == BLOCK_SIZE_N && K == 1) {
+#pragma forceinline
+                do_block_simd<aligned, false, BLOCK_SIZE_M, BLOCK_SIZE_N, 1>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
+              } else if (M == BLOCK_SIZE_M && N == 1 && K == BLOCK_SIZE_K) {
+#pragma forceinline
+                do_block_simd_N_1<BLOCK_SIZE_M, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
+              } else {
+#pragma forceinline
+                do_block_naive(lda, lda, lda, M, N, K, A + i * lda + k, B + k * lda + j, C + i * lda + j);
+              }
+            } else {
+#pragma forceinline
+              do_block_naive(lda, lda, lda, M, N, K, A + i * lda + k, B + k * lda + j, C + i * lda + j);
+            }
           }
         }
       }
@@ -213,6 +284,9 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   if (remain > padding_dim / 2 + 1) {
     pad = true;
     dim = (lda / padding_dim + 1) * padding_dim;
+  }
+
+  if (pad) {
 #pragma ivdep
     for (int i = 0; i < whole_width; ++i) {
       double *__restrict__ const A_buf_pos = A_buf + i * MAX_N + whole_width;
