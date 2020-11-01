@@ -199,6 +199,7 @@ static inline __attribute__((always_inline)) void square_gemm_simd(bool pad, int
             // printf("naive %d %d %d\n", M, N, K);
             // remaining large blocks
             if constexpr (BLOCK_SIZE_N == 32) {
+              // use some specialized kernels to speed up
               if (M == 1 && N == BLOCK_SIZE_N && K == BLOCK_SIZE_K) {
 #pragma forceinline
                 do_block_simd<aligned, false, 1, BLOCK_SIZE_N, BLOCK_SIZE_K>(lda, lda, lda, A + i * lda + k, B + k * lda + j, C + i * lda + j);
@@ -227,12 +228,14 @@ static inline __attribute__((always_inline)) void square_gemm_simd(bool pad, int
 #include "dgemm-blocked-strassen-kernel.hh"
 #define STRASSEN_DEGRADE_SIZE 32
 
+
 /* This routine performs a dgemm operation
  *  C := C + A * B
  * where A, B, and C are lda-by-lda matrices stored in column-major format.
  * On exit, A and B maintain their input values. */
 extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double *__restrict__ B,
                   double *__restrict__ const C) {
+
 
   // (A*B)^T = B^T * A^T, so we can treat A, B, C in row-major format and
   // calculate C = C + B * A swap A and B for simplicity
@@ -244,8 +247,8 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   // if everything is aligned, we can use the aligned kernel!
   bool aligned = ((size_t) A & 0b11111) == 0 && ((size_t) B & 0b11111) == 0 && ((size_t) C & 0b11111) == 0 && (lda % 4) == 0;
 
-  bool pad = false;
-  int dim = lda;
+  bool pad = false; // when the matricies are padded
+  int dim = lda; // the processed dimension
 
 #if ENABLE_STRASSEN
   if (likely((dim & (dim - 1)) == 0 && dim >= STRASSEN_DEGRADE_SIZE)) {
@@ -286,6 +289,7 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
     dim = (lda / padding_dim + 1) * padding_dim;
   }
 
+  // copy on memory of last block (needs to be padded)
   if (pad) {
 #pragma ivdep
     for (int i = 0; i < whole_width; ++i) {
