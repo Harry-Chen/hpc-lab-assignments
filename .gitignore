@@ -2,7 +2,6 @@
 !*.c
 !*.cpp
 !*.cu
-Makefile
 CMakeList.txt
 build
 .vscode/
