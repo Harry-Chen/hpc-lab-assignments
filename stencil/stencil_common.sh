@@ -15,10 +15,10 @@ export DATAPATH=${BASEDIR}/ylm_ans/
 MPIRUN=$(which mpirun)
 SRUN=$(which srun)
 
-if [ -x "$MPIRUN" ]; then
-  EXEC_PREFIX="$MPIRUN -n $NODES"
-else
+if [ -x "$SRUN" ]; then
   EXEC_PREFIX="$SRUN -N $NODES --nodelist=cn00[2-5] --exclusive --pty"
+else
+  EXEC_PREFIX="$MPIRUN -n $NODES"
 fi
 
 export EXEC="$EXEC_PREFIX $EXE"
