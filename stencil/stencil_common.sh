@@ -10,7 +10,7 @@ else
   BASEDIR="/home/course/HW/stencil_data"
 fi
 
-export DATAPATH=${BASEDIR}/ylm_ans/
+export BASEDIR
 
 MPIRUN=$(which mpirun)
 SRUN=$(which srun)
