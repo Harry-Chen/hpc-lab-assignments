@@ -47,7 +47,7 @@ dgemm-blocked.o: dgemm-blocked.cc
 	$(CXX) -c $(CXXFLAGS) -o $@ $<
 dgemm-strassen.o: dgemm-blocked.cc dgemm-blocked-strassen-kernel.hh
 	$(CXX) -c $(CXXFLAGS) -DENABLE_STRASSEN=1 -o $@ $<
-dgemm-openmp.o: dgemm-openmp.cc
+dgemm-openmp.o: dgemm-openmp.cc dgemm-openmp-threadnum.hh
 	$(CXX) -c $(CXXFLAGS) -qopenmp -o $@ $<
 benchmark-strassen.o: benchmark.c
 	$(CC) -c $(CFLAGS) -DENABLE_STRASSEN=1 -o $@ $<

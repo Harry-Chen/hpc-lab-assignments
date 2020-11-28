@@ -6,6 +6,15 @@
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <omp.h>
+
+#include <algorithm>
+
+#include "dgemm-openmp-threadnum.hh"
+
+#ifndef _OPENMP
+#error This file must be compiled with OpenMP
+#endif
 
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
@@ -24,7 +33,8 @@ static inline __attribute__((always_inline)) void do_block_simd(
     const double *__restrict__ const B, double *__restrict__ const C) {
 
   // copy whole A to L1
-  double A_block[M * K];
+  static double A_block[M * K];
+#pragma omp threadprivate(A_block)
 
   if constexpr (!aligned) {
     for (int i = 0; i < M; ++i) {
@@ -239,6 +249,18 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   bool pad = false; // when the matricies are padded
   int dim = lda; // the processed dimension
 
+  // choose appropriate openmp thread number
+  int max_threads = omp_get_num_threads();
+  auto opt_threads = OPENMP_THREADS_TUNED.find(lda);
+  if (opt_threads != OPENMP_THREADS_TUNED.end()) {
+      for (const auto t : opt_threads->second) {
+          if (t <= max_threads) {
+              omp_set_num_threads(t);
+              break;
+          }
+      }
+  }
+
   // round to power of 2
   int size = lda;
 
@@ -266,12 +288,6 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
     pad = true;
     dim = (lda / padding_dim + 1) * padding_dim;
   }
-
-//   if (whole_width <= 160) {
-
-//   } else if (whole_width <= ) {
-
-//   } else if (whole )
 
   // copy on memory of last block (needs to be padded)
   if (pad) {
