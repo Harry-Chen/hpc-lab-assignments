@@ -1,7 +1,12 @@
 
-CC = mpiicc 
-OPT =
-CFLAGS = -Wall -std=c99 $(OPT) -qopenmp -no-multibyte-chars
+CC = ../icc-wrapper icc
+CXX = ../icc-wrapper icpc
+MPICC = ../icc-wrapper mpiicc
+MPICXX = ../icc-wrapper mpiicpc
+OPT = -Ofast -ffast-math -fast -xHost -ip
+FLAGS_COMMON = -Wall -g -qopenmp -no-multibyte-chars
+CFLAGS = -std=c99 $(FLAGS_COMMON) $(OPT)
+CXXFLAGS = -std=c++17 $(FLAGS_COMMON) $(OPT)
 LDFLAGS = -Wall -qopenmp
 LDLIBS = $(LDFLAGS)
 
@@ -12,19 +17,19 @@ objects = check.o benchmark.o stencil-naive.o stencil-omp.o stencil-mpi.o
 default : all
 
 .PHONY : all
-all : clean $(targets)
+all : $(targets)
 
-benchmark-naive : check.o benchmark.o stencil-naive.o
-	$(CC) -o $@ $^ $(LDLIBS)
+benchmark-% : check.o benchmark.o stencil-%.o
+	$(MPICXX) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
-benchmark-omp : check.o benchmark.o stencil-omp.o
-	$(CC) -o $@ $^ $(LDLIBS)
-
-benchmark-mpi : check.o benchmark.o stencil-mpi.o
-	$(CC) -o $@ $^ $(LDLIBS)
-
-%.o : %.c common.h
-	$(CC) -c $(CFLAGS) $< -o $@
+check.o : check.c common.h
+	$(MPICC) -c $(CFLAGS) $< -o $@
+benchmark.o : benchmark.c common.h
+	$(MPICC) -c $(CFLAGS) $< -o $@
+stencil-naive.o : stencil-naive.c common.h
+	$(MPICC) -c $(CFLAGS) $< -o $@
+%.o : %.cc common.h
+	$(MPICXX) -c $(CXXFLAGS) $< -o $@
 
 .PHONY: clean
 clean:

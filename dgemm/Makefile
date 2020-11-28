@@ -2,10 +2,10 @@
 # This makefile is intended for the Intel C compiler.
 # Your code must compile (with icc) with the given CFLAGS. You may experiment with the OPT variable to invoke additional compiler options.
 
-CC = ./icc-wrapper icc
-CXX = ./icc-wrapper icpc
+CC = ../icc-wrapper icc
+CXX = ../icc-wrapper icpc
 OPT_COMMON = -Ofast -ffast-math
-OPT = $(OPT_COMMON) -fast -xHost -ip 
+OPT = $(OPT_COMMON) -fast -xHost -ip
 OPT_GCC = $(OPT_COMMON) -march=native -mtune=native
 FLAGS_COMMON = -Wall -DGETTIMEOFDAY -g
 CFLAGS = -std=c99 $(FLAGS_COMMON) $(OPT)

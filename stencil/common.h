@@ -57,6 +57,11 @@ typedef struct {
 } dist_grid_info_t;
 
 /* type == 7 or type == 27 */
+
+#ifdef __cplusplus 
+extern "C" { 
+#endif 
+
 void create_dist_grid(dist_grid_info_t *info, int stencil_type);
 void destroy_dist_grid(dist_grid_info_t *info);
 /* `arr` is the input array, `aux` is an auxiliary buffer
@@ -64,5 +69,10 @@ void destroy_dist_grid(dist_grid_info_t *info);
  * the returned value should be either equal to `A0` or `A1` */
 ptr_t stencil_7(ptr_t A0, ptr_t A1,ptr_t B0, ptr_t B1,ptr_t C0, ptr_t C1, const dist_grid_info_t *info, int nt);
 // ptr_t stencil_27(ptr_t arr, ptr_t aux, const dist_grid_info_t *info, int nt);
+
+
+#ifdef __cplusplus 
+} 
+#endif 
 
 #endif
