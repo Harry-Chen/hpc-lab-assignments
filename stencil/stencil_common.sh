@@ -16,7 +16,7 @@ MPIRUN=$(which mpirun)
 SRUN=$(which srun)
 
 if [ -x "$SRUN" ]; then
-  EXEC_PREFIX="$SRUN -N $NODES --nodelist=cn00[2-5] --exclusive --pty"
+  EXEC_PREFIX="$SRUN -N $NODES-$NODES --partition=cpu --exclusive --pty"
 else
   EXEC_PREFIX="$MPIRUN -n $NODES"
 fi
