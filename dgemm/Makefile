@@ -5,7 +5,7 @@
 CC = ./icc-wrapper icc
 CXX = ./icc-wrapper icpc
 OPT_COMMON = -Ofast -ffast-math
-OPT = $(OPT_COMMON) -fast -xHost -ip -ipo
+OPT = $(OPT_COMMON) -fast -xHost -ip 
 OPT_GCC = $(OPT_COMMON) -march=native -mtune=native
 FLAGS_COMMON = -Wall -DGETTIMEOFDAY -g
 CFLAGS = -std=c99 $(FLAGS_COMMON) $(OPT)

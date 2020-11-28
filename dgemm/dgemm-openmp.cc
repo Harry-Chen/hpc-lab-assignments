@@ -227,7 +227,7 @@ static inline __attribute__((always_inline)) void square_gemm_simd(bool pad, int
   }
 }
 
-static int last_lda = -1;
+static int last_lda = -1, max_threads;
 
 /* This routine performs a dgemm operation
  *  C := C + A * B
@@ -251,14 +251,13 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
   int dim = lda; // the processed dimension
 
   // choose appropriate openmp thread number
-  int max_threads = omp_get_num_threads();
-  if (lda != last_lda) {
+  if (unlikely(lda != last_lda)) {
     last_lda = lda;
     auto opt_threads = OPENMP_THREADS_TUNED.find(lda);
     if (opt_threads != OPENMP_THREADS_TUNED.end()) {
         for (const auto t : opt_threads->second) {
             if (t <= max_threads) {
-                fprintf(stderr, "Set OMP_NUM_THREADS to %d for LDA %d", t, lda);
+                // fprintf(stderr, "Set OMP_NUM_THREADS to %d for LDA %d OMP_NUM_THREADS %d\n", t, lda, max_threads);
                 omp_set_num_threads(t);
                 break;
             }
@@ -375,7 +374,7 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
 
 
 // run before main()
-__attribute__((constructor)) void bind_core() {
+__attribute__((constructor)) void preprocess() {
   // allocate aligned buffers and clear them
   size_t buf_size = MAX_N * MAX_N * sizeof(double);
   posix_memalign((void **)&A_buf, 64, buf_size);
@@ -384,4 +383,6 @@ __attribute__((constructor)) void bind_core() {
   bzero(A_buf, buf_size);
   bzero(B_buf, buf_size);
   bzero(C_buf, buf_size);
+  max_threads = omp_get_max_threads();
 }
+
