@@ -6,3 +6,5 @@ CMakeList.txt
 build
 .vscode/
 perf.data*
+*.swp
+
