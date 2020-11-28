@@ -33,8 +33,8 @@
 #define INDEX(xx, yy, zz, ldxx, ldyy) ((xx) + (ldxx) * ((yy) + (ldyy) * (zz)))
 
 typedef double data_t;
-typedef data_t* ptr_t;
-typedef const data_t* cptr_t;
+typedef data_t*__restrict__ ptr_t;
+typedef const data_t*__restrict__ cptr_t;
 #define DATA_TYPE MPI_DOUBLE
 
 /* 
