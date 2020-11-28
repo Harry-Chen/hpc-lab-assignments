@@ -227,6 +227,7 @@ static inline __attribute__((always_inline)) void square_gemm_simd(bool pad, int
   }
 }
 
+static int last_lda = -1;
 
 /* This routine performs a dgemm operation
  *  C := C + A * B
@@ -251,14 +252,18 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
 
   // choose appropriate openmp thread number
   int max_threads = omp_get_num_threads();
-  auto opt_threads = OPENMP_THREADS_TUNED.find(lda);
-  if (opt_threads != OPENMP_THREADS_TUNED.end()) {
-      for (const auto t : opt_threads->second) {
-          if (t <= max_threads) {
-              omp_set_num_threads(t);
-              break;
-          }
-      }
+  if (lda != last_lda) {
+    last_lda = lda;
+    auto opt_threads = OPENMP_THREADS_TUNED.find(lda);
+    if (opt_threads != OPENMP_THREADS_TUNED.end()) {
+        for (const auto t : opt_threads->second) {
+            if (t <= max_threads) {
+                fprintf(stderr, "Set OMP_NUM_THREADS to %d for LDA %d", t, lda);
+                omp_set_num_threads(t);
+                break;
+            }
+        }
+    }
   }
 
   // round to power of 2

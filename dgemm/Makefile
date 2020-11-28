@@ -35,7 +35,7 @@ benchmark-naive: benchmark.o dgemm-naive.o
 benchmark-blocked: benchmark.o dgemm-blocked.o
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 benchmark-openmp: benchmark.o dgemm-openmp.o
-	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS) -qopenmp
+	$(CXX) -o $@ $^ $(LDFLAGS) $(LDLIBS) -qopenmp
 benchmark-blas: benchmark.o dgemm-blas.o
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
