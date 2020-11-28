@@ -1,4 +1,6 @@
 #!/bin/bash
+#SBATCH --partition=cpu
+#SBATCH --exclusive
 
 if [ "$#" -ne 2 ]; then
   echo "Usage: $0 <executable> <number of nodes>" >&2
