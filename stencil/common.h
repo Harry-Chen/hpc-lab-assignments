@@ -40,6 +40,7 @@ typedef const data_t*__restrict__ cptr_t;
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
+
 /* 
  * Global array `g`: array of size
  * global_size_x * global_size_y * global_size_z

@@ -28,7 +28,7 @@ benchmark.o : benchmark.c common.h
 	$(MPICC) -c $(CFLAGS) $< -o $@
 stencil-naive.o : stencil-naive.c common.h
 	$(MPICC) -c $(CFLAGS) $< -o $@
-%.o : %.cc common.h
+%.o : %.cc common.h stencil-common.hh
 	$(MPICXX) -c $(CXXFLAGS) $< -o $@
 
 .PHONY: clean
