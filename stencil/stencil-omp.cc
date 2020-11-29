@@ -77,15 +77,23 @@ static inline __attribute__((always_inline)) void copy_from_buffer(
 // print thread local buffer, debug purpose
 void debug_buffer(ptr_t buf, int dim, int lda, int start=0) {
     fprintf(stderr, "\n\nstart ");
-    for (int z = start; z < start+dim; ++z) {
-        for (int y = start; y < start+dim; ++y) {
-            for (int x = start; x < start+dim; ++x) {
+    for (int z = start; z < start + dim; ++z) {
+        for (int y = start; y < start + dim; ++y) {
+            for (int x = start; x < start + dim; ++x) {
                 fprintf(stderr, "%.3lf ", buf[INDEX(x, y, z, lda, lda)]);
             }
         }
     }
     fprintf(stderr, "end\n\n");
     fflush(stderr);
+}
+
+static inline __attribute__((always_inline)) void clear_buffers(ptr_t a) {
+    for (int zz = BT - 1; zz < BZ + BT + 1; ++zz) {
+        for (int yy = BT - 1; yy < BY + BT + 1; ++yy) {
+            bzero(a + INDEX(BT - 1, yy, zz, BUF_DIM_X, BUF_DIM_Y), sizeof(data_t) * (BX + 2));
+        }
+    }
 }
 
 
@@ -171,8 +179,11 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                     int y_begin = max(y_off - BT, 0), y_stop = min(y + BY + BT, y_end) - y_start, buf_y_start = BT - (y_off - y_begin), buf_y_end = BUF_DIM_Y - (y_off + BY + BT - y_stop);
                     int x_begin = max(x_off - BT, 0), x_stop = min(x + BX + BT, x_end) - x_start, buf_x_start = BT - (x_off - x_begin), buf_x_end = BUF_DIM_X - (x_off + BX + BT - x_stop);
                     // allocate contiguous buffer
-                    data_t a_buf_0[BUF_SIZE] = {}, b_buf_0[BUF_SIZE] = {}, c_buf_0[BUF_SIZE] = {}; // make sure it is zero initialized
-                    data_t a_buf_1[BUF_SIZE] = {}, b_buf_1[BUF_SIZE] = {}, c_buf_1[BUF_SIZE] = {};
+                    data_t a_buf_0[BUF_SIZE], b_buf_0[BUF_SIZE], c_buf_0[BUF_SIZE];
+                    data_t a_buf_1[BUF_SIZE], b_buf_1[BUF_SIZE], c_buf_1[BUF_SIZE];
+                    // clear buffer to avoid errors
+                    clear_buffers(a_buf_0); clear_buffers(b_buf_0); clear_buffers(c_buf_0);
+                    clear_buffers(a_buf_1); clear_buffers(b_buf_1); clear_buffers(c_buf_1);
                     // data needed to be copied in each loop
                     size_t copy_size = sizeof(data_t) * (x_stop - x_begin);
                     // pack a0, b0, c0 (and BT level of neighbours) to buffer
@@ -195,6 +206,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                     // in each round, the dimension shrinks by 1
                     // a_buf_0 -> a_buf_1 -> a_buf_0 -> a_buf_1 -> a_buf_0
                     ptr_t A0 = a_buf_0, A1 = a_buf_1, B0 = b_buf_0, B1 = b_buf_1, C0 = c_buf_0, C1 = c_buf_1;
+#pragma unroll(BT)
                     for (int t = BT - 1; t >= 0; --t) {
                         int x_start = max(BT - t, buf_x_start), y_start = max(BT - t, buf_y_start), z_start = max(BT - t, buf_z_start);
                         int x_end = min(BT + BX + t, buf_x_end), y_end = min(BT + BY + t, buf_y_end), z_end = min(BT + BZ + t, buf_z_end);

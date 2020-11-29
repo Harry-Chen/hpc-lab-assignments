@@ -2,11 +2,6 @@
 #SBATCH --partition=cpu
 #SBATCH --exclusive
 
-if [ "$#" -ne 2 ]; then
-  echo "Usage: $0 <executable> <number of nodes>" >&2
-  exit 1
-fi
-
 source ./stencil_common.sh $*
 
 DATAPATH=${BASEDIR}
