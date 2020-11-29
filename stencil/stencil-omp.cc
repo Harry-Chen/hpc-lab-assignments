@@ -60,12 +60,12 @@ static inline __attribute__((always_inline)) void copy_from_buffer(
     int x_start, int y_start, int z_start,
     int ldx, int ldy, int ldz
 ) {
-    for (int z_ = z; z_ < z + BZ; ++z_) {
-        for (int y_ = y; y_ < y + BY; ++y_) {
-            int buf_z = (z_ - z_start) % BZ + BT;
-            int buf_y = (y_ - y_start) % BY + BT;
+    for (int zz = z; zz < z + BZ; ++zz) {
+        for (int yy = y; yy < y + BY; ++yy) {
+            int buf_z = (zz - z_start) % BZ + BT;
+            int buf_y = (yy - y_start) % BY + BT;
             int buf_off = INDEX(BT, buf_y, buf_z, BUF_DIM_X, BUF_DIM_Y);
-            int src_off = INDEX(x, y_, z_, ldx, ldy);
+            int src_off = INDEX(x, yy, zz, ldx, ldy);
             memcpy(a + src_off, a_buf + buf_off, sizeof(data_t) * BX);
             memcpy(b + src_off, b_buf + buf_off, sizeof(data_t) * BX);
             memcpy(c + src_off, c_buf + buf_off, sizeof(data_t) * BX);
@@ -75,15 +75,17 @@ static inline __attribute__((always_inline)) void copy_from_buffer(
 
 
 // print thread local buffer, debug purpose
-void debug_buffer(ptr_t buf) {
-    for (int z = 0; z < BUF_DIM_Z; ++z) {
-        for (int y = 0; y < BUF_DIM_Y; ++y) {
-            for (int x = 0; x < BUF_DIM_Z; ++x) {
-                fprintf(stderr, "%.3lf ", buf[INDEX(x, y, z, BUF_DIM_X, BUF_DIM_Y)]);
+void debug_buffer(ptr_t buf, int dim, int lda, int start=0) {
+    fprintf(stderr, "\n\nstart ");
+    for (int z = start; z < start+dim; ++z) {
+        for (int y = start; y < start+dim; ++y) {
+            for (int x = start; x < start+dim; ++x) {
+                fprintf(stderr, "%.3lf ", buf[INDEX(x, y, z, lda, lda)]);
             }
         }
     }
-    fprintf(stderr, "\n");
+    fprintf(stderr, "end\n\n");
+    fflush(stderr);
 }
 
 
@@ -96,6 +98,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     assert(grid_info->local_size_x % BX == 0);
     assert(grid_info->local_size_y % BY == 0);
     assert(grid_info->local_size_z % BZ == 0);
+    assert(BT % 2 == 0);
 
 
     int x_start = grid_info->halo_size_x, x_end = grid_info->local_size_x + grid_info->halo_size_x;
@@ -143,10 +146,10 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
 
     ptr_t ret = A0;
     // fused rounds (after each round, a1 will store BT rounds of stencil on a0, and a0 will be garbage)
-    int fused_t = (nt - 1) / BT;
+    int t_fused = (nt - 1) / BT;
 
     // main stencil loop
-    for (int t = 0; t < fused_t; t++) {
+    for (int t = 0; t < t_fused; t++) {
 
         ptr_t a0 = bufferx[t % 2];
         ptr_t a1 = bufferx[(t + 1) % 2];
@@ -164,12 +167,12 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                     int z_off = z - z_start, y_off = y - y_start, x_off = x - x_start;
                     using std::min;
                     using std::max;
-                    int z_begin = max(z_off - BT, 0), z_stop = min(z_off + BZ + BT, z_end - z_start), buf_z_start = BT - (z_off - z_begin), buf_z_end = BUF_DIM_Z - (z_off + BZ + BT - z_stop);
-                    int y_begin = max(y_off - BT, 0), y_stop = min(y_off + BY + BT, y_end - y_start), buf_y_start = BT - (y_off - y_begin), buf_y_end = BUF_DIM_Y - (y_off + BY + BT - y_stop);
-                    int x_begin = max(x_off - BT, 0), x_stop = min(x_off + BX + BT, x_end - x_start), buf_x_start = BT - (x_off - x_begin), buf_x_end = BUF_DIM_X - (x_off + BX + BT - x_stop);
+                    int z_begin = max(z_off - BT, 0), z_stop = min(z + BZ + BT, z_end) - z_start, buf_z_start = BT - (z_off - z_begin), buf_z_end = BUF_DIM_Z - (z_off + BZ + BT - z_stop);
+                    int y_begin = max(y_off - BT, 0), y_stop = min(y + BY + BT, y_end) - y_start, buf_y_start = BT - (y_off - y_begin), buf_y_end = BUF_DIM_Y - (y_off + BY + BT - y_stop);
+                    int x_begin = max(x_off - BT, 0), x_stop = min(x + BX + BT, x_end) - x_start, buf_x_start = BT - (x_off - x_begin), buf_x_end = BUF_DIM_X - (x_off + BX + BT - x_stop);
                     // allocate contiguous buffer
                     data_t a_buf_0[BUF_SIZE] = {}, b_buf_0[BUF_SIZE] = {}, c_buf_0[BUF_SIZE] = {}; // make sure it is zero initialized
-                    data_t a_buf_1[BUF_SIZE], b_buf_1[BUF_SIZE], c_buf_1[BUF_SIZE];
+                    data_t a_buf_1[BUF_SIZE] = {}, b_buf_1[BUF_SIZE] = {}, c_buf_1[BUF_SIZE] = {};
                     // data needed to be copied in each loop
                     size_t copy_size = sizeof(data_t) * (x_stop - x_begin);
                     // pack a0, b0, c0 (and BT level of neighbours) to buffer
@@ -215,8 +218,8 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
 
 
     // deal with remaining steps (because we need information from both A0 and A1)
-    for (int t = 0; t < nt - fused_t * BT; ++t) {
-        int t_ = fused_t + t; // actual rounds
+    for (int t = 0; t < nt - t_fused * BT; ++t) {
+        int t_ = t_fused + t; // actual rounds
         cptr_t a0 = bufferx[t_ % 2];
         ptr_t a1 = bufferx[(t_ + 1) % 2];
 
