@@ -28,9 +28,6 @@
 #define BUF_DIM_Z (BZ + 2 * BT)
 #define BUF_SIZE (BUF_DIM_X * BUF_DIM_Y * BUF_DIM_Z)
 
-// MPI blocking
-#define MPI_HALO_WIDTH 3
-
 // copy data from buffer to origin matrix
 static inline __attribute__((always_inline)) void copy_from_buffer(
     ptr_t a, ptr_t b, ptr_t c,

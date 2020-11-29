@@ -8,7 +8,7 @@ FLAGS_COMMON = -Wall -g -qopenmp -no-multibyte-chars
 CFLAGS = -std=c99 $(FLAGS_COMMON) $(OPT)
 CXXFLAGS = -std=c++17 $(FLAGS_COMMON) $(OPT)
 LDFLAGS = -Wall -qopenmp -g
-LDLIBS = $(LDFLAGS)
+LDLIBS = $(LDFLAGS) -lnuma
 
 targets = benchmark-naive benchmark-omp benchmark-mpi
 objects = check.o benchmark.o stencil-naive.o stencil-omp.o stencil-mpi.o

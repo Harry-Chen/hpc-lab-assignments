@@ -21,21 +21,32 @@ export BASEDIR
 MPIRUN=$(which mpirun)
 SRUN=$(which srun)
 
+
 if [ -x "$SRUN" ]; then
   EXEC_PREFIX="$SRUN -N $NODES-$NODES --partition=cpu --exclusive --pty"
   case $NODES in
     1)
-      NODES="cn002"
+      NODELIST="cn002"
     ;;
     2)
-      NODES="cn00[2-3]"
+      NODELIST="cn00[2-3]"
     ;;
     4)
-      NODES="cn00[2-5]"
+      NODELIST="cn00[2-5]"
+    ;;
+    *)
+      echo "Node number $NODES not supportted"
+      exit 1
+    ;;
   esac
-  EXEC_PREFIX="$EXEC_PREFIX --nodelist=$NODES"
+  if [[ $string == *"mpi" ]]; then
+    TASK_PER_NODE=2 # SMP
+  else
+    TASK_PER_NODE=1 # OMP
+  fi
+  EXEC_PREFIX="$EXEC_PREFIX --nodelist=$NODELIST --ntasks-per-node=${TASKS_PER_NODE}"
 else
-  EXEC_PREFIX="$MPIRUN -n $NODES"
+  EXEC_PREFIX="$MPIRUN -n $NODES" # just for test purpose
 fi
 
 export EXEC="$EXEC_PREFIX $EXE"
@@ -45,4 +56,4 @@ export OMP_PLACES=cores
 export OMP_PROC_BIND=close
 export OMP_NUM_THREADS=$THREADS
 
-echo "Running command \"$EXEC\" on $NODES nodes * $THREADS threads"
+echo "Running command \"$EXEC\" on $NODES ranks * $THREADS threads"

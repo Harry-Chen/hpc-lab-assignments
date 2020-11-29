@@ -51,7 +51,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
 
     // actual stencil computation
     auto stencil_inner_loop = [](cptr_t a0, ptr_t a1, cptr_t b0, ptr_t b1, cptr_t c0, ptr_t c1, int x_start, int x_end, int y, int z, int ldx, int ldy, int ldz) __attribute__((always_inline)) {
-        #pragma omp simd
+#pragma omp simd
         for (int x = x_start; x < x_end; ++x) {
             data_t a7,b7,c7;
             a7 \
@@ -137,7 +137,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                     }
                     // run stencil kernel on current block for BT rounds
                     // in each round, the dimension shrinks by 1
-                    // a_buf_0 -> a_buf_1 -> a_buf_0 -> a_buf_1 -> a_buf_0
+                    // a_buf_0 -> a_buf_1 -> a_buf_0 -> ...
                     ptr_t A0 = a_buf_0, A1 = a_buf_1, B0 = b_buf_0, B1 = b_buf_1, C0 = c_buf_0, C1 = c_buf_1;
 #pragma unroll(BT)
                     for (int t = BT - 1; t >= 0; --t) {
