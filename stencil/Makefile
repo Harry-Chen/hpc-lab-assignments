@@ -7,7 +7,7 @@ OPT = -Ofast -ffast-math -fast -xHost -ip
 FLAGS_COMMON = -Wall -g -qopenmp -no-multibyte-chars
 CFLAGS = -std=c99 $(FLAGS_COMMON) $(OPT)
 CXXFLAGS = -std=c++17 $(FLAGS_COMMON) $(OPT)
-LDFLAGS = -Wall -qopenmp
+LDFLAGS = -Wall -qopenmp -g
 LDLIBS = $(LDFLAGS)
 
 targets = benchmark-naive benchmark-omp benchmark-mpi
