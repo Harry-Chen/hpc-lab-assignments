@@ -140,20 +140,22 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
         }
     };
 
-    int t, k;
+
     ptr_t ret = A0;
+    // fused rounds (after each round, a1 will store BT rounds of stencil on a0, and a0 will be garbage)
+    int fused_t = (nt - 1) / BT;
 
     // main stencil loop
-    for (t = 0, k = 0; t < nt - BT; t += BT, k++) {
+    for (int t = 0; t < fused_t; t++) {
 
-        ptr_t a0 = bufferx[k % 2];
-        ptr_t a1 = bufferx[(k + 1) % 2];
+        ptr_t a0 = bufferx[t % 2];
+        ptr_t a1 = bufferx[(t + 1) % 2];
 
-        ptr_t b0 = buffery[k % 2];
-        ptr_t b1 = buffery[(k + 1) % 2];
+        ptr_t b0 = buffery[t % 2];
+        ptr_t b1 = buffery[(t + 1) % 2];
 
-        ptr_t c0 = bufferz[k % 2];
-        ptr_t c1 = bufferz[(k + 1) % 2];
+        ptr_t c0 = bufferz[t % 2];
+        ptr_t c1 = bufferz[(t + 1) % 2];
         
 #pragma omp parallel for collapse(2) schedule(static)
         for (int z = z_start; z < z_end; z += BZ) {
@@ -213,7 +215,8 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
 
 
     // deal with remaining steps (because we need information from both A0 and A1)
-    for (int t_ = k; t_ < nt - t + k; ++t_) {
+    for (int t = 0; t < nt - fused_t * BT; ++t) {
+        int t_ = fused_t + t; // actual rounds
         cptr_t a0 = bufferx[t_ % 2];
         ptr_t a1 = bufferx[(t_ + 1) % 2];
 
