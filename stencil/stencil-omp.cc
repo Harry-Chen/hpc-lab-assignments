@@ -7,7 +7,7 @@
 
 #include "stencil-common.hh"
 
-const char* version_name = "Optimized version (OpenMP)";
+extern "C" const char* version_name = "Optimized version (OpenMP)";
 
 void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     if(grid_info->p_id == 0) {
@@ -40,9 +40,8 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     assert(grid_info->local_size_x % BX == 0);
     assert(grid_info->local_size_y % BY == 0);
     assert(grid_info->local_size_z % BZ == 0);
-    assert(BT % 2 == 0);
 
-
+    // calculate local size
     int x_start = grid_info->halo_size_x, x_end = grid_info->local_size_x + grid_info->halo_size_x;
     int y_start = grid_info->halo_size_y, y_end = grid_info->local_size_y + grid_info->halo_size_y;
     int z_start = grid_info->halo_size_z, z_end = grid_info->local_size_z + grid_info->halo_size_z;
@@ -155,7 +154,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                         std::swap(C0, C1);
                     }
                     // copy back from buffer to a1, b1, c1
-                    copy_from_buffer(a1, b1, c1, a_buf_0, b_buf_0, c_buf_0, x, y, z, x_start, y_start, z_start, ldx, ldy, ldz);
+                    copy_from_buffer(a1, b1, c1, A0, B0, C0, x, y, z, x_start, y_start, z_start, ldx, ldy, ldz);
                     ret = a1;
                 }
             }

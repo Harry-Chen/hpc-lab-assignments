@@ -3,10 +3,13 @@
 
 #include <cstring>
 #include <cstdio>
+#include <cassert>
 
 #include "common.h"
 
-// blocking
+#define REQUIRE(COND, MSG) assert(((void) MSG, COND))
+
+// OMP blocking
 #if !defined BX
 #define BX 16
 #endif
@@ -17,13 +20,16 @@
 #define BZ 16
 #endif
 #if !defined BT
-#define BT 4
+#define BT 3
 #endif
 
 #define BUF_DIM_X (BX + 2 * BT)
 #define BUF_DIM_Y (BY + 2 * BT)
 #define BUF_DIM_Z (BZ + 2 * BT)
 #define BUF_SIZE (BUF_DIM_X * BUF_DIM_Y * BUF_DIM_Z)
+
+// MPI blocking
+#define MPI_HALO_WIDTH 3
 
 // copy data from buffer to origin matrix
 static inline __attribute__((always_inline)) void copy_from_buffer(
