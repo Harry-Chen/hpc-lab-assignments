@@ -88,10 +88,11 @@ void debug_buffer(ptr_t buf, int dim, int lda, int start=0) {
     fflush(stderr);
 }
 
+template <int BUFFER_CLEAR_EXT = 3>
 static inline __attribute__((always_inline)) void clear_buffers(ptr_t a) {
-    for (int zz = BT - 1; zz < BZ + BT + 1; ++zz) {
-        for (int yy = BT - 1; yy < BY + BT + 1; ++yy) {
-            bzero(a + INDEX(BT - 1, yy, zz, BUF_DIM_X, BUF_DIM_Y), sizeof(data_t) * (BX + 2));
+    for (int zz = BT - BUFFER_CLEAR_EXT; zz < BZ + BT + BUFFER_CLEAR_EXT; ++zz) {
+        for (int yy = BT - BUFFER_CLEAR_EXT; yy < BY + BT + BUFFER_CLEAR_EXT; ++yy) {
+            bzero(a + INDEX(BT - BUFFER_CLEAR_EXT, yy, zz, BUF_DIM_X, BUF_DIM_Y), sizeof(data_t) * (BX + 2 * BUFFER_CLEAR_EXT));
         }
     }
 }
