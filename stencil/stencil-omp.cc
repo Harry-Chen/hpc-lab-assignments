@@ -180,11 +180,11 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                     int y_begin = max(y_off - BT, 0), y_stop = min(y + BY + BT, y_end) - y_start, buf_y_start = BT - (y_off - y_begin), buf_y_end = BUF_DIM_Y - (y_off + BY + BT - y_stop);
                     int x_begin = max(x_off - BT, 0), x_stop = min(x + BX + BT, x_end) - x_start, buf_x_start = BT - (x_off - x_begin), buf_x_end = BUF_DIM_X - (x_off + BX + BT - x_stop);
                     // allocate contiguous buffer
-                    data_t a_buf_0[BUF_SIZE], b_buf_0[BUF_SIZE], c_buf_0[BUF_SIZE];
-                    data_t a_buf_1[BUF_SIZE], b_buf_1[BUF_SIZE], c_buf_1[BUF_SIZE];
+                    data_t a_buf_0[BUF_SIZE] = {}, b_buf_0[BUF_SIZE] = {}, c_buf_0[BUF_SIZE] = {};
+                    data_t a_buf_1[BUF_SIZE] = {}, b_buf_1[BUF_SIZE] = {}, c_buf_1[BUF_SIZE] = {};
                     // clear buffer to avoid errors
-                    clear_buffers(a_buf_0); clear_buffers(b_buf_0); clear_buffers(c_buf_0);
-                    clear_buffers(a_buf_1); clear_buffers(b_buf_1); clear_buffers(c_buf_1);
+                    // clear_buffers(a_buf_0); clear_buffers(b_buf_0); clear_buffers(c_buf_0);
+                    // clear_buffers(a_buf_1); clear_buffers(b_buf_1); clear_buffers(c_buf_1);
                     // data needed to be copied in each loop
                     size_t copy_size = sizeof(data_t) * (x_stop - x_begin);
                     // pack a0, b0, c0 (and BT level of neighbours) to buffer

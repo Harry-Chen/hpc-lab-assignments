@@ -23,6 +23,17 @@ SRUN=$(which srun)
 
 if [ -x "$SRUN" ]; then
   EXEC_PREFIX="$SRUN -N $NODES-$NODES --partition=cpu --exclusive --pty"
+  case $NODES in
+    1)
+      NODES="cn002"
+    ;;
+    2)
+      NODES="cn00[2-3]"
+    ;;
+    4)
+      NODES="cn00[2-5]"
+  esac
+  EXEC_PREFIX="$EXEC_PREFIX --nodelist=$NODES"
 else
   EXEC_PREFIX="$MPIRUN -n $NODES"
 fi
