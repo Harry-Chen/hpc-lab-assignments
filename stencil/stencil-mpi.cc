@@ -10,9 +10,9 @@ extern "C" const char* version_name = "Optimized version (MPI + OpenMP)";
 
 void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     
-    // split data array
-    int ranks = grid_info->p_num;
-    int slice_z = 1 + (ranks & 2 != 0), slice_y = 1 + (ranks & 4 != 0), slice_x = 1 + (ranks & 8 != 0);
+    // split data array in z, y, x dims
+    int ranks = grid_info->p_num, rank = grid_info->p_id;
+    int slice_z = 1 + (ranks % 2 == 0), slice_y = 1 + (ranks % 4 == 0), slice_x = 1 + (ranks % 8 == 0);
 
     // retrieve local rank and do some checking
     MPI_Comm local_comm;
@@ -26,7 +26,7 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     int cpus = numa_num_task_cpus();
     int threads = omp_get_max_threads();
 
-    if (grid_info->p_id == 0) {
+    if (rank == 0) {
         REQUIRE(ranks == 1 || ranks == 2 || ranks == 4 || ranks == 8, "MPI rank number not allowed");
         REQUIRE(grid_info->global_size_x % slice_x == 0 && grid_info->global_size_y % slice_y == 0 && grid_info->global_size_z % slice_z == 0, "Dimensions must divide number of slices");
         if (local_size != nodes) {
@@ -38,7 +38,7 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     }
 
     // bind process to NUMA node (OpenMP threads binds automatically)
-    if (grid_info->p_num >= 2) {
+    if (ranks >= 2) {
         auto cpu_mask = numa_allocate_nodemask();
         numa_bitmask_setbit(cpu_mask, local_rank % nodes);
         numa_bind(cpu_mask);
@@ -51,9 +51,11 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     grid_info->local_size_y = grid_info->global_size_y / slice_y;
     grid_info->local_size_z = grid_info->global_size_z / slice_z;
 
-    grid_info->offset_x = 0;
-    grid_info->offset_y = 0;
-    grid_info->offset_z = 0;
+    grid_info->offset_x = ((rank / 4) % 2) * grid_info->local_size_x;
+    grid_info->offset_y = ((rank / 2) % 2) * grid_info->local_size_y;
+    grid_info->offset_z = (rank % 2) * grid_info->local_size_z;
+
+    // fprintf(stderr, "Rank %d offset x %d y %d z %d\n", rank, grid_info->offset_x, grid_info->offset_y, grid_info->offset_z);
 
     grid_info->halo_size_x = BT + 1;
     grid_info->halo_size_y = BT + 1;
