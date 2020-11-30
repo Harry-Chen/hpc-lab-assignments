@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <string.h>
 #include <omp.h>
+#include <numa.h>
 
 #include <algorithm>
 
@@ -251,6 +252,8 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
 
   // choose appropriate openmp thread number
   if (unlikely(lda != last_lda)) {
+    int nodes = numa_num_task_nodes();
+    int cpus = numa_num_task_cpus();
     last_lda = lda;
     auto opt_threads = OPENMP_THREADS_TUNED.find(lda);
     if (opt_threads != OPENMP_THREADS_TUNED.end()) {
@@ -258,6 +261,12 @@ extern "C" void square_dgemm(int lda, const double *__restrict__ A, const double
             if (t <= max_threads) {
                 // fprintf(stderr, "Set OMP_NUM_THREADS to %d for LDA %d OMP_NUM_THREADS %d\n", t, lda, max_threads);
                 omp_set_num_threads(t);
+                auto cpu_mask = numa_allocate_nodemask();
+                numa_bitmask_setbit(cpu_mask, 0);
+                if (t > cpus / nodes) {
+                  numa_bitmask_setbit(cpu_mask, 1);
+                }
+                numa_bind(cpu_mask);
                 break;
             }
         }

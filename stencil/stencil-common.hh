@@ -29,7 +29,8 @@
 #define BUF_DIM_Z (BZ + 2 * BT)
 #define BUF_SIZE (BUF_DIM_X * BUF_DIM_Y * BUF_DIM_Z)
 
-#define TRIVIAL_METHOD_THRESHOLD 1024
+#define TRIVIAL_METHOD_THRESHOLD_OMP 1024
+#define TRIVIAL_METHOD_THRESHOLD_MPI 768
 
 using std::max;
 using std::min;
