@@ -245,11 +245,8 @@ struct stencil_neighbour_t {
 
 
 // parameters for tiling
-#define TX 16
-#define TY 8
-#define TZ 16
-#define TT 16
-
+#define TY 12
+#define TT 10
 
 struct do_nothing_t {
     void operator() (...) {}

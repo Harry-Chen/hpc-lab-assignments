@@ -51,7 +51,7 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
 
     int halo_size_x = 1;
     int halo_size_y = 1;
-    int halo_size_z = TT + 1;
+    int halo_size_z = grid_info->global_size_z < 768 ? TT + 1 : BT + 1;
 
     // config grid info
     grid_info->local_size_x = local_size_x;
@@ -262,7 +262,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     if (grid_info->global_size_x < 768) {
         if (has_up) z_end += TT;
         if (has_down) z_start -= TT;
-        return stencil_time_skew<false>(
+        return stencil_time_skew<true>(
             x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz,
             [neighbours] (auto a, auto b, auto c) __attribute__((always_inline)) {
                 exchange_data(a, b, c, neighbours);
