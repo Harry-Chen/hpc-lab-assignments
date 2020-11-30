@@ -33,29 +33,7 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     assert(grid_info->local_size_y % BY == 0);
     assert(grid_info->local_size_z % BZ == 0);
 
-    al1 = _mm256_set1_pd((double)ALPHA_ZZZ);
-    al2 = _mm256_set1_pd((double)ALPHA_NZZ);
-    al3 = _mm256_set1_pd((double)ALPHA_PZZ);
-    al4 = _mm256_set1_pd((double)ALPHA_ZNZ);
-    al5 = _mm256_set1_pd((double)ALPHA_ZPZ);
-    al6 = _mm256_set1_pd((double)ALPHA_ZZN);
-    al7 = _mm256_set1_pd((double)ALPHA_ZZP);
-
-    bl1 = _mm256_set1_pd((double)ALPHA_PNZ);
-    bl2 = _mm256_set1_pd((double)ALPHA_NPZ);
-    bl3 = _mm256_set1_pd((double)ALPHA_PPZ);
-    bl4 = _mm256_set1_pd((double)ALPHA_NZN);
-    bl5 = _mm256_set1_pd((double)ALPHA_PZN);
-    bl6 = _mm256_set1_pd((double)ALPHA_PZP);
-    bl7 = _mm256_set1_pd((double)ALPHA_NZP);
-
-    cl1 = _mm256_set1_pd((double)ALPHA_PNN);
-    cl2 = _mm256_set1_pd((double)ALPHA_PPN);
-    // cl3 = _mm256_set1_pd((double)ALPHA_);
-    cl4 = _mm256_set1_pd((double)ALPHA_NNP);
-    cl5 = _mm256_set1_pd((double)ALPHA_PNP);
-    cl6 = _mm256_set1_pd((double)ALPHA_NPP);
-    cl7 = _mm256_set1_pd((double)ALPHA_PPP);
+    load_stencil_coefficients();
 }
 
 void destroy_dist_grid(dist_grid_info_t *grid_info) {
