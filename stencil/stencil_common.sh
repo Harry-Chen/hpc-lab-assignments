@@ -40,9 +40,9 @@ if [ -x "$SRUN" ]; then
     ;;
   esac
   if [[ $string == *"mpi" ]]; then
-    TASK_PER_NODE=2 # SMP
+    TASKS_PER_NODE=2 # SMP
   else
-    TASK_PER_NODE=1 # OMP
+    TASKS_PER_NODE=1 # OMP
   fi
   EXEC_PREFIX="$EXEC_PREFIX --nodelist=$NODELIST --ntasks-per-node=${TASKS_PER_NODE}"
 else
