@@ -139,7 +139,7 @@ ptr_t inline __attribute__((always_inline)) stencil_trivial(
 
 // benchmark entrypoint
 ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, const dist_grid_info_t *grid_info, int nt) {
-    
+
     ptr_t bufferx[2] = {A0, A1};
     ptr_t buffery[2] = {B0, B1};
     ptr_t bufferz[2] = {C0, C1};
@@ -152,7 +152,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     int ldy = grid_info->local_size_y + 2 * grid_info->halo_size_y;
     int ldz = grid_info->local_size_z + 2 * grid_info->halo_size_z;
 
-    if (grid_info->global_size_x < 512) {
+    if (grid_info->global_size_x < TRIVIAL_METHOD_THRESHOLD) {
         return stencil_time_skew(x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz);
     } else {
         return stencil_trivial(x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz);
