@@ -49,7 +49,9 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     int local_size_z = grid_info->global_size_z / ranks;
     int offset_z = rank * local_size_z;
 
-    int halo_size = BT + 1;
+    int halo_size_x = 1;
+    int halo_size_y = 1;
+    int halo_size_z = TT + 1;
 
     // config grid info
     grid_info->local_size_x = local_size_x;
@@ -60,15 +62,15 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     grid_info->offset_y = 0;
     grid_info->offset_z = offset_z;
 
-    grid_info->halo_size_x = halo_size;
-    grid_info->halo_size_y = halo_size;
-    grid_info->halo_size_z = halo_size;
+    grid_info->halo_size_x = halo_size_x;
+    grid_info->halo_size_y = halo_size_y;
+    grid_info->halo_size_z = halo_size_z;
 
     // fprintf(stderr, "Rank %d offset x %d y %d z %d\n", rank, grid_info->offset_x, grid_info->offset_y, grid_info->offset_z);
 
     // size of local data
-    int local_sizes[3] = {local_size_x + 2 * halo_size, local_size_y + 2 * halo_size, local_size_z + 2 * halo_size};
-    int sub_sizes[3] = {local_size_x, local_size_y, halo_size};
+    int local_sizes[3] = {local_size_x + 2 * halo_size_x, local_size_y + 2 * halo_size_y, local_size_z + 2 * halo_size_z};
+    int sub_sizes[3] = {local_size_x, local_size_y, halo_size_z};
 
     auto neighbours = new stencil_neighbour_t[NEIGHBOUR_NUM]();
     grid_info->additional_info = neighbours;
@@ -76,7 +78,7 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     // calculate neighbour information along z axis
     if (rank < ranks - 1) {
         neighbours[0].rank = rank + 1;
-        int starts[3] = {halo_size, halo_size, local_size_z + halo_size};
+        int starts[3] = {halo_size_x, halo_size_y, local_size_z + halo_size_z};
         int comm_type;
         // data to receive (from remote data to local halo)
         MPI_Type_create_subarray(3, local_sizes, sub_sizes, starts, MPI_ORDER_FORTRAN, MPI_DOUBLE, &comm_type);
@@ -90,18 +92,20 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     }
     if (rank > 0) {
         neighbours[1].rank = rank - 1;
-        int starts[3] = {halo_size, halo_size, 0};
+        int starts[3] = {halo_size_x, halo_size_y, 0};
         int comm_type;
         // data to receive (from remote data to local halo)
         MPI_Type_create_subarray(3, local_sizes, sub_sizes, starts, MPI_ORDER_FORTRAN, MPI_DOUBLE, &comm_type);
         MPI_Type_commit(&comm_type);
         neighbours[1].recv_type = comm_type;
         // data to receive (from local data to remote halo)
-        starts[2] = halo_size;
+        starts[2] = halo_size_z;
         MPI_Type_create_subarray(3, local_sizes, sub_sizes, starts, MPI_ORDER_FORTRAN, MPI_DOUBLE, &comm_type);
         MPI_Type_commit(&comm_type);
         neighbours[1].send_type = comm_type;
     }
+
+    load_stencil_coefficients();
 }
 
 void destroy_dist_grid(dist_grid_info_t *grid_info) {
@@ -132,25 +136,16 @@ void inline __attribute__((always_inline)) exchange_data(ptr_t a0, ptr_t b0, ptr
         }
 }
 
-ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, const dist_grid_info_t *grid_info, int nt) {
-  
-    auto neighbours = (stencil_neighbour_t *) grid_info->additional_info;
 
-    ptr_t bufferx[2] = {A0, A1};
-    ptr_t buffery[2] = {B0, B1};
-    ptr_t bufferz[2] = {C0, C1};
-
-    // calculate local size
-    int x_start = grid_info->halo_size_x, x_end = grid_info->local_size_x + grid_info->halo_size_x;
-    int y_start = grid_info->halo_size_y, y_end = grid_info->local_size_y + grid_info->halo_size_y;
-    int z_start = grid_info->halo_size_z, z_end = grid_info->local_size_z + grid_info->halo_size_z;
-    int ldx = grid_info->local_size_x + 2 * grid_info->halo_size_x;
-    int ldy = grid_info->local_size_y + 2 * grid_info->halo_size_y;
-    int ldz = grid_info->local_size_z + 2 * grid_info->halo_size_z;
-    bool has_up = grid_info->p_id < grid_info->p_num - 1, has_down = grid_info->p_id > 0;
-
-    ptr_t ret = A0;
-
+ptr_t inline __attribute__((always_inline)) stencil_trivial(
+    int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, 
+    int nt, int ldx, int ldy, int ldz,
+    ptr_t bufferx[2], ptr_t buffery[2], ptr_t bufferz[2],
+    bool has_down, bool has_up, stencil_neighbour_t *neighbours
+) {
+    
+    // return array
+    ptr_t ret = bufferx[0];
     // fused rounds (after each round, a1 will store BT rounds of stencil on a0, and a0 will be garbage)
     int t_fused = nt / BT;
 
@@ -173,8 +168,6 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
             for (int y = y_start; y < y_end; y += BY) {
                 for (int x = x_start; x < x_end; x += BX) {
                     int z_off = z - z_start, y_off = y - y_start, x_off = x - x_start;
-                    using std::min;
-                    using std::max;
                     int z_begin = max(z_off - BT, 0), z_stop = min(z + BZ + BT, z_end) - z_start;
                     int y_begin = max(y_off - BT, 0), y_stop = min(y + BY + BT, y_end) - y_start;
                     int x_begin = max(x_off - BT, 0), x_stop = min(x + BX + BT, x_end) - x_start;
@@ -191,9 +184,6 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                     // allocate contiguous buffer
                     data_t a_buf_0[BUF_SIZE] = {}, b_buf_0[BUF_SIZE] = {}, c_buf_0[BUF_SIZE] = {};
                     data_t a_buf_1[BUF_SIZE] = {}, b_buf_1[BUF_SIZE] = {}, c_buf_1[BUF_SIZE] = {};
-                    // clear buffer to avoid errors
-                    // clear_buffers(a_buf_0); clear_buffers(b_buf_0); clear_buffers(c_buf_0);
-                    // clear_buffers(a_buf_1); clear_buffers(b_buf_1); clear_buffers(c_buf_1);
                     // data needed to be copied in each loop
                     size_t copy_size = sizeof(data_t) * (x_stop - x_begin);
                     // pack a0, b0, c0 (and BT level of neighbours) to buffer
@@ -233,6 +223,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                             STENCIL_FUSED_LOOP
                         }
                     } else {
+                        // remaining steps
                         for (int t = (nt - k) - 1; t >= 0; --t) {
                             STENCIL_FUSED_LOOP
 #undef STENCIL_FUSED_LOOP
@@ -247,4 +238,38 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     }
 
     return ret;
+}
+
+
+// benchmark entrypoint
+ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, const dist_grid_info_t *grid_info, int nt) {
+  
+    auto neighbours = (stencil_neighbour_t *) grid_info->additional_info;
+
+    ptr_t bufferx[2] = {A0, A1};
+    ptr_t buffery[2] = {B0, B1};
+    ptr_t bufferz[2] = {C0, C1};
+
+    // calculate local size
+    int x_start = grid_info->halo_size_x, x_end = grid_info->local_size_x + grid_info->halo_size_x;
+    int y_start = grid_info->halo_size_y, y_end = grid_info->local_size_y + grid_info->halo_size_y;
+    int z_start = grid_info->halo_size_z, z_end = grid_info->local_size_z + grid_info->halo_size_z;
+    int ldx = grid_info->local_size_x + 2 * grid_info->halo_size_x;
+    int ldy = grid_info->local_size_y + 2 * grid_info->halo_size_y;
+    int ldz = grid_info->local_size_z + 2 * grid_info->halo_size_z;
+    bool has_up = grid_info->p_id < grid_info->p_num - 1, has_down = grid_info->p_id > 0;
+
+    if (grid_info->global_size_x < 1024) {
+        if (has_up) z_end += TT;
+        if (has_down) z_start -= TT;
+        return stencil_time_skew<true>(
+            x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz,
+            [neighbours] (auto a, auto b, auto c) __attribute__((always_inline)) {
+                exchange_data(a, b, c, neighbours);
+            }
+        );
+    } else {
+        return stencil_trivial(x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz, has_down, has_up, neighbours);
+    }
+
 }

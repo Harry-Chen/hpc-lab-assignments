@@ -36,63 +36,6 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
 
 void destroy_dist_grid(dist_grid_info_t *grid_info) {}
 
-#define TX 16
-#define TY 8
-#define TZ 16
-#define TT 16
-
-// time skew blocking
-// reference: https://github.com/shoaibkamil/stencilprobe/blob/master/probe_heat_timeskew.c
-// reference: https://people.csail.mit.edu/skamil/projects/stencilprobe/
-ptr_t inline __attribute__((always_inline)) stencil_time_skew(
-    int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, 
-    int nt, int ldx, int ldy, int ldz,
-    ptr_t bufferx[2], ptr_t buffery[2], ptr_t bufferz[2]
-) {
-
-    // blocking on t dimension
-    for (int t = 0; t < nt; t += TT) {
-
-        // slope in time skewing
-        int neg_t_slope = t == 0 ? 0 : 1;
-        int pos_t_slope = t == nt - TT ? 0 : -1;
-
-        // blocking on y dimension
-        for (int y = y_start; y < y_end; y += TY) {
-
-            int neg_y_slope = y == 1 ? 0 : 1;
-            int pos_y_slope = y == y_end - TY ? 0 : -1;
-
-            int t_begin = max(0, t - t * neg_t_slope);
-            int t_stop = max(0, t + TY + t * pos_t_slope);
-
-            // do actual stencil
-            for (int tt = t_begin; tt < t_stop; tt++) {
-                int y_begin = max(y_start, y - tt * neg_y_slope);
-                int y_stop = max(y_start, y + TY + tt * pos_y_slope);
-
-                cptr_t a0 = bufferx[tt % 2];
-                ptr_t a1 = bufferx[(tt + 1) % 2];
-
-                cptr_t b0 = buffery[tt % 2];
-                ptr_t b1 = buffery[(tt + 1) % 2];
-
-                cptr_t c0 = bufferz[tt % 2];
-                ptr_t c1 = bufferz[(tt + 1) % 2];
-
-#pragma omp parallel for collapse(1) schedule(static)
-                for (int zz = z_start; zz < z_end; zz++) {
-                    for (int yy = y_begin; yy < y_stop; yy++) {
-                        stencil_inner_loop<true>(a0, a1, b0, b1, c0, c1, x_start, x_end, yy, zz, ldx, ldy, ldz);
-                    }
-                }
-            }
-        }
-    }
-
-    return bufferx[nt % 2];
-}
-
 
 ptr_t inline __attribute__((always_inline)) stencil_trivial(
     int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, 
@@ -122,8 +65,6 @@ ptr_t inline __attribute__((always_inline)) stencil_trivial(
             for (int y = y_start; y < y_end; y += BY) {
                 for (int x = x_start; x < x_end; x += BX) {
                     int z_off = z - z_start, y_off = y - y_start, x_off = x - x_start;
-                    using std::min;
-                    using std::max;
                     int z_begin = max(z_off - BT, 0), z_stop = min(z + BZ + BT, z_end) - z_start, buf_z_start = BT - (z_off - z_begin), buf_z_end = BUF_DIM_Z - (z_off + BZ + BT - z_stop);
                     int y_begin = max(y_off - BT, 0), y_stop = min(y + BY + BT, y_end) - y_start, buf_y_start = BT - (y_off - y_begin), buf_y_end = BUF_DIM_Y - (y_off + BY + BT - y_stop);
                     int x_begin = max(x_off - BT, 0), x_stop = min(x + BX + BT, x_end) - x_start, buf_x_start = BT - (x_off - x_begin), buf_x_end = BUF_DIM_X - (x_off + BX + BT - x_stop);
@@ -197,8 +138,8 @@ ptr_t inline __attribute__((always_inline)) stencil_trivial(
 
 
 // benchmark entrypoint
-ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1,
-                const dist_grid_info_t *grid_info, int nt) {
+ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, const dist_grid_info_t *grid_info, int nt) {
+    
     ptr_t bufferx[2] = {A0, A1};
     ptr_t buffery[2] = {B0, B1};
     ptr_t bufferz[2] = {C0, C1};
