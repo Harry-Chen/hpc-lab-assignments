@@ -39,7 +39,7 @@ if [ -x "$SRUN" ]; then
       exit 1
     ;;
   esac
-  if [[ $EXEC == *"mpi" ]]; then
+  if [[ $EXE == *"mpi" ]]; then
     TASKS_PER_NODE=2 # SMP
   else
     export OMP_PLACES=cores
