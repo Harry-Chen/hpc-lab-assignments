@@ -20,7 +20,7 @@
 #define BZ 16
 #endif
 #if !defined BT
-#define BT 3
+#define BT 4
 #endif
 
 #define BUF_DIM_X (BX + 2 * BT)
@@ -108,5 +108,13 @@ void inline __attribute__((always_inline)) stencil_inner_loop(cptr_t a0, ptr_t a
         c1[INDEX(x, y, z, ldx, ldy)] = c7  +  (a7 * b7) / (a7 + b7); //sqrt
     }
 };
+
+typedef struct {
+    int rank = -1;
+    int recv_type = -1;
+    int send_type = -1;
+} stencil_neighbour_t;
+
+#define NEIGHBOUR_NUM 2
 
 #endif

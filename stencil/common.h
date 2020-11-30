@@ -56,7 +56,6 @@ typedef struct {
     int local_size_x, local_size_y, local_size_z;
     int offset_x, offset_y, offset_z;
     int halo_size_x, halo_size_y, halo_size_z;
-    int slice_x, slice_y, slice_z;
     int p_id, p_num;
     void *additional_info;
 } dist_grid_info_t;
