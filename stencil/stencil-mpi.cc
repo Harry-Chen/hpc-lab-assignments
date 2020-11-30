@@ -155,7 +155,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     int t_fused = nt / BT;
 
     // main stencil loop
-    for (int t = 0; t < t_fused; t++) {
+    for (int k = 0, t = 0; k < nt; k += BT, t += 1) {
 
         ptr_t a0 = bufferx[t % 2];
         ptr_t a1 = bufferx[(t + 1) % 2];
@@ -216,19 +216,27 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
                     // in each round, the dimension shrinks by 1
                     // a_buf_0 -> a_buf_1 -> a_buf_0 -> ...
                     ptr_t A0 = a_buf_0, A1 = a_buf_1, B0 = b_buf_0, B1 = b_buf_1, C0 = c_buf_0, C1 = c_buf_1;
+                    if (likely(t < t_fused)) {
 #pragma unroll(BT)
-                    for (int t = BT - 1; t >= 0; --t) {
-                        int xx_start = max(BT - t, buf_x_start), yy_start = max(BT - t, buf_y_start), zz_start = max(BT - t, buf_z_start);
-                        int xx_end = min(BT + BX + t, buf_x_end), yy_end = min(BT + BY + t, buf_y_end), zz_end = min(BT + BZ + t, buf_z_end);
-                        for (int zz = zz_start; zz < zz_end; ++zz) {
-                            for (int yy = yy_start; yy < yy_end; ++yy) {
-                                stencil_inner_loop(A0, A1, B0, B1, C0, C1, xx_start, xx_end, yy, zz, BUF_DIM_X, BUF_DIM_Y, BUF_DIM_Z);
-                            }
+                        for (int t = BT - 1; t >= 0; --t) {
+#define STENCIL_FUSED_LOOP \
+                            int xx_start = max(BT - t, buf_x_start), yy_start = max(BT - t, buf_y_start), zz_start = max(BT - t, buf_z_start); \
+                            int xx_end = min(BT + BX + t, buf_x_end), yy_end = min(BT + BY + t, buf_y_end), zz_end = min(BT + BZ + t, buf_z_end); \
+                            for (int zz = zz_start; zz < zz_end; ++zz) { \
+                                for (int yy = yy_start; yy < yy_end; ++yy) { \
+                                    stencil_inner_loop(A0, A1, B0, B1, C0, C1, xx_start, xx_end, yy, zz, BUF_DIM_X, BUF_DIM_Y, BUF_DIM_Z); \
+                                } \
+                            } \
+                            std::swap(A0, A1); \
+                            std::swap(B0, B1); \
+                            std::swap(C0, C1);
+                            STENCIL_FUSED_LOOP
                         }
-                        // swap buffers for next round
-                        std::swap(A0, A1);
-                        std::swap(B0, B1);
-                        std::swap(C0, C1);
+                    } else {
+                        for (int t = (nt - k) - 1; t >= 0; --t) {
+                            STENCIL_FUSED_LOOP
+#undef STENCIL_FUSED_LOOP
+                        }
                     }
                     // copy back from buffer to a1, b1, c1
                     copy_from_buffer(a1, b1, c1, A0, B0, C0, x, y, z, x_start, y_start, z_start, ldx, ldy, ldz);
@@ -237,29 +245,6 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
             }
         }
     }
-
-//     // deal with remaining steps
-//     exchange_data(bufferx[t_fused % 2], buffery[t_fused % 2], bufferz[t_fused % 2], neighbours);
-    
-//     for (int t = 0; t < nt - t_fused * BT; ++t) {
-//         int t_ = t_fused + t; // actual rounds
-//         cptr_t a0 = bufferx[t_ % 2];
-//         ptr_t a1 = bufferx[(t_ + 1) % 2];
-
-//         cptr_t b0 = buffery[t_ % 2];
-//         ptr_t b1 = buffery[(t_ + 1) % 2];
-
-//         cptr_t c0 = bufferz[t_ % 2];
-//         ptr_t c1 = bufferz[(t_ + 1) % 2];
-        
-// #pragma omp parallel for collapse(2) schedule(static)
-//         for (int z = z_start; z < z_end; ++z) {
-//             for (int y = y_start; y < y_end; ++y) {
-//                 stencil_inner_loop(a0, a1, b0, b1, c0, c1, x_start, x_end, y, z, ldx, ldy, ldz);
-//             }
-//         }
-//         ret = a1;
-//     }
 
     return ret;
 }

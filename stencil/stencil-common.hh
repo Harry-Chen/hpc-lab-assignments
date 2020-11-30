@@ -20,7 +20,7 @@
 #define BZ 16
 #endif
 #if !defined BT
-#define BT 4
+#define BT 3
 #endif
 
 #define BUF_DIM_X (BX + 2 * BT)
