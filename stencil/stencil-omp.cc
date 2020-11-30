@@ -1,17 +1,15 @@
+#include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <omp.h>
-#include <cassert>
-#include <algorithm>
-
-// #include "../../dbg-macro/dbg.h"
 
 #include "stencil-common.hh"
 
-extern "C" const char* version_name = "Optimized version (OpenMP)";
+extern "C" const char *version_name = "Optimized version (OpenMP)";
 
 void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
-    
-    if(grid_info->p_id == 0) {
+
+    if (grid_info->p_id == 0) {
         grid_info->local_size_x = grid_info->global_size_x;
         grid_info->local_size_y = grid_info->global_size_y;
         grid_info->local_size_z = grid_info->global_size_z;
@@ -36,11 +34,14 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     load_stencil_coefficients();
 }
 
-void destroy_dist_grid(dist_grid_info_t *grid_info) {
+void destroy_dist_grid(dist_grid_info_t *grid_info) {}
 
-}
+#define TX 16
+#define TY 16
+#define TZ 16
 
-ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, const dist_grid_info_t *grid_info, int nt) {
+ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1,
+                const dist_grid_info_t *grid_info, int nt) {
     ptr_t bufferx[2] = {A0, A1};
     ptr_t buffery[2] = {B0, B1};
     ptr_t bufferz[2] = {C0, C1};
@@ -53,103 +54,39 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     int ldy = grid_info->local_size_y + 2 * grid_info->halo_size_y;
     int ldz = grid_info->local_size_z + 2 * grid_info->halo_size_z;
 
-    ptr_t ret = A0;
-    // fused rounds (after each round, a1 will store BT rounds of stencil on a0, and a0 will be garbage)
-    int t_fused = nt / BT;
+    using std::max;
+    using std::min;
 
-    // main stencil loop
-    for (int t = 0; t < t_fused; t++) {
+    for (int y = y_start; y < y_end; y += TY) {
 
-        ptr_t a0 = bufferx[t % 2];
-        ptr_t a1 = bufferx[(t + 1) % 2];
+        // slope in time skewing
+        int neg_y_slope = y == 1 ? 0 : 1;
+        int pos_y_slope = y == y_end - TY ? 0 : -1;
 
-        ptr_t b0 = buffery[t % 2];
-        ptr_t b1 = buffery[(t + 1) % 2];
+        // do a full stencil
+        for (int t = 0; t < nt; t++) {
 
-        ptr_t c0 = bufferz[t % 2];
-        ptr_t c1 = bufferz[(t + 1) % 2];
-        
-#pragma omp parallel for collapse(2) schedule(static)
-        for (int z = z_start; z < z_end; z += BZ) {
-            for (int y = y_start; y < y_end; y += BY) {
-                for (int x = x_start; x < x_end; x += BX) {
-                    int z_off = z - z_start, y_off = y - y_start, x_off = x - x_start;
-                    using std::min;
-                    using std::max;
-                    int z_begin = max(z_off - BT, 0), z_stop = min(z + BZ + BT, z_end) - z_start, buf_z_start = BT - (z_off - z_begin), buf_z_end = BUF_DIM_Z - (z_off + BZ + BT - z_stop);
-                    int y_begin = max(y_off - BT, 0), y_stop = min(y + BY + BT, y_end) - y_start, buf_y_start = BT - (y_off - y_begin), buf_y_end = BUF_DIM_Y - (y_off + BY + BT - y_stop);
-                    int x_begin = max(x_off - BT, 0), x_stop = min(x + BX + BT, x_end) - x_start, buf_x_start = BT - (x_off - x_begin), buf_x_end = BUF_DIM_X - (x_off + BX + BT - x_stop);
-                    // allocate contiguous buffer
-                    data_t a_buf_0[BUF_SIZE] = {}, b_buf_0[BUF_SIZE] = {}, c_buf_0[BUF_SIZE] = {};
-                    data_t a_buf_1[BUF_SIZE] = {}, b_buf_1[BUF_SIZE] = {}, c_buf_1[BUF_SIZE] = {};
-                    // clear buffer to avoid errors
-                    // clear_buffers(a_buf_0); clear_buffers(b_buf_0); clear_buffers(c_buf_0);
-                    // clear_buffers(a_buf_1); clear_buffers(b_buf_1); clear_buffers(c_buf_1);
-                    // data needed to be copied in each loop
-                    size_t copy_size = sizeof(data_t) * (x_stop - x_begin);
-                    // pack a0, b0, c0 (and BT level of neighbours) to buffer
-                    for (int z_ = z_begin; z_ < z_stop; ++z_) {
-                        int src_z = z_ + z_start;
-                        int buf_z = z_ - z_off + BT;
-                        for (int y_ = y_begin; y_ < y_stop; ++y_) {
-                            int src_y = y_ + y_start;
-                            int src_x = x_begin + x_start;
-                            int buf_y = y_ - y_off + BT;
-                            // dbg(buf_x, buf_y, buf_z, src_x, src_y, src_z);
-                            int buf_off = INDEX(buf_x_start, buf_y, buf_z, BUF_DIM_X, BUF_DIM_Y);
-                            int src_off = INDEX(src_x, src_y, src_z, ldx, ldy);
-                            memcpy(a_buf_0 + buf_off, a0 + src_off, copy_size);
-                            memcpy(b_buf_0 + buf_off, b0 + src_off, copy_size);
-                            memcpy(c_buf_0 + buf_off, c0 + src_off, copy_size);
-                        }
-                    }
-                    // run stencil kernel on block buffer for BT rounds
-                    // in each round, the dimension shrinks by 1
-                    // a_buf_0 -> a_buf_1 -> a_buf_0 -> ...
-                    ptr_t A0 = a_buf_0, A1 = a_buf_1, B0 = b_buf_0, B1 = b_buf_1, C0 = c_buf_0, C1 = c_buf_1;
-#pragma unroll(BT)
-                    for (int t = BT - 1; t >= 0; --t) {
-                        int xx_start = max(BT - t, buf_x_start), yy_start = max(BT - t, buf_y_start), zz_start = max(BT - t, buf_z_start);
-                        int xx_end = min(BT + BX + t, buf_x_end), yy_end = min(BT + BY + t, buf_y_end), zz_end = min(BT + BZ + t, buf_z_end);
-                        for (int zz = zz_start; zz < zz_end; ++zz) {
-                            for (int yy = yy_start; yy < yy_end; ++yy) {
-                                stencil_inner_loop(A0, A1, B0, B1, C0, C1, xx_start, xx_end, yy, zz, BUF_DIM_X, BUF_DIM_Y, BUF_DIM_Z);
-                            }
-                        }
-                        // swap buffers for next round
-                        std::swap(A0, A1);
-                        std::swap(B0, B1);
-                        std::swap(C0, C1);
-                    }
-                    // copy back from buffer to a1, b1, c1
-                    copy_from_buffer(a1, b1, c1, A0, B0, C0, x, y, z, x_start, y_start, z_start, ldx, ldy, ldz);
-                    ret = a1;
+            // blocking on y dimension
+            int y_begin = max(y_start, y - t * neg_y_slope);
+            int y_stop = max(y_start, y + TY + t * pos_y_slope);
+
+            cptr_t a0 = bufferx[t % 2];
+            ptr_t a1 = bufferx[(t + 1) % 2];
+
+            cptr_t b0 = buffery[t % 2];
+            ptr_t b1 = buffery[(t + 1) % 2];
+
+            cptr_t c0 = bufferz[t % 2];
+            ptr_t c1 = bufferz[(t + 1) % 2];
+
+#pragma omp parallel for collapse(1) schedule(static)
+            for (int zz = z_start; zz < z_end; zz++) {
+                for (int yy = y_begin; yy < y_stop; yy++) {
+                    stencil_inner_loop<true>(a0, a1, b0, b1, c0, c1, x_start, x_end, yy, zz, ldx, ldy, ldz);
                 }
             }
         }
     }
 
-
-    // deal with remaining steps
-    for (int t = 0; t < nt - t_fused * BT; ++t) {
-        int t_ = t_fused + t; // actual rounds
-        cptr_t a0 = bufferx[t_ % 2];
-        ptr_t a1 = bufferx[(t_ + 1) % 2];
-
-        cptr_t b0 = buffery[t_ % 2];
-        ptr_t b1 = buffery[(t_ + 1) % 2];
-
-        cptr_t c0 = bufferz[t_ % 2];
-        ptr_t c1 = bufferz[(t_ + 1) % 2];
-        
-#pragma omp parallel for collapse(2) schedule(static)
-        for (int z = z_start; z < z_end; ++z) {
-            for (int y = y_start; y < y_end; ++y) {
-                stencil_inner_loop(a0, a1, b0, b1, c0, c1, x_start, x_end, y, z, ldx, ldy, ldz);
-            }
-        }
-        ret = a1;
-    }
-
-    return ret;
+    return bufferx[nt % 2];
 }
