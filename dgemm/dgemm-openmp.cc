@@ -151,7 +151,6 @@ static inline __attribute__((always_inline)) void do_block_naive(
     __builtin_prefetch(A + i * lda, 0);
     __builtin_prefetch(C + i * ldc, 1);
 #pragma vector vecremainder
-#pragma omp parallel for schedule(static)
     for (int j = 0; j < N; ++j) {
       /* Compute C(i,j) */
 #pragma ivdep
@@ -170,9 +169,9 @@ template <bool aligned, int BLOCK_SIZE_M, int BLOCK_SIZE_N = BLOCK_SIZE_M, int B
 static inline __attribute__((always_inline)) void square_gemm_simd(bool pad, int dim, int whole_width, int lda, const double *__restrict__ const A,
     const double *__restrict__ const B, double *__restrict__ const C) {
   /* For each block-row of A */
+#pragma omp parallel for schedule(static)
   for (int i = 0; i < dim; i += BLOCK_SIZE_M) {
     /* For each block-column of B */
-#pragma omp parallel for schedule(static)
     for (int j = 0; j < dim; j += BLOCK_SIZE_N) {
       /* Accumulate block dgemms into block of C */
       for (int k = 0; k < dim; k += BLOCK_SIZE_K) {
