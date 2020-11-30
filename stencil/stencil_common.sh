@@ -39,9 +39,11 @@ if [ -x "$SRUN" ]; then
       exit 1
     ;;
   esac
-  if [[ $string == *"mpi" ]]; then
+  if [[ $EXEC == *"mpi" ]]; then
     TASKS_PER_NODE=2 # SMP
   else
+    export OMP_PLACES=cores
+    export OMP_PROC_BIND=close
     TASKS_PER_NODE=1 # OMP
   fi
   EXEC_PREFIX="$EXEC_PREFIX --nodelist=$NODELIST --ntasks-per-node=${TASKS_PER_NODE}"
@@ -50,10 +52,6 @@ else
 fi
 
 export EXEC="$EXEC_PREFIX $EXE"
-
-# OpenMP core binding
-export OMP_PLACES=cores
-export OMP_PROC_BIND=close
 export OMP_NUM_THREADS=$THREADS
 
 echo "Running command \"$EXEC\" on $NODES ranks * $THREADS threads"
