@@ -26,7 +26,7 @@ if [ -x "$SRUN" ]; then
   EXEC_PREFIX="$SRUN -N $NODES-$NODES --partition=cpu --exclusive --pty"
   case $NODES in
     1)
-      NODELIST="cn002"
+      NODELIST="cn00[2]"
     ;;
     2)
       NODELIST="cn00[2-3]"

@@ -259,10 +259,10 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     int ldz = grid_info->local_size_z + 2 * grid_info->halo_size_z;
     bool has_up = grid_info->p_id < grid_info->p_num - 1, has_down = grid_info->p_id > 0;
 
-    if (grid_info->global_size_x < TRIVIAL_METHOD_THRESHOLD) {
+    if (grid_info->global_size_x < 768) {
         if (has_up) z_end += TT;
         if (has_down) z_start -= TT;
-        return stencil_time_skew<true>(
+        return stencil_time_skew<false>(
             x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz,
             [neighbours] (auto a, auto b, auto c) __attribute__((always_inline)) {
                 exchange_data(a, b, c, neighbours);
