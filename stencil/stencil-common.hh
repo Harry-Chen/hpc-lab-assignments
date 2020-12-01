@@ -247,7 +247,7 @@ struct stencil_neighbour_t {
 
 // parameters for tiling
 #define TY 12
-#define TT 10
+#define TT 16
 
 struct do_nothing_t {
     void operator() (...) {}
@@ -261,6 +261,7 @@ ptr_t inline __attribute__((always_inline)) stencil_time_skew(
     int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, 
     int nt, int ldx, int ldy, int ldz,
     ptr_t bufferx[2], ptr_t buffery[2], ptr_t bufferz[2],
+    bool has_up = false, bool has_down = false,
     F&& mpi_callback = do_nothing_t()
 ) {
 
@@ -277,8 +278,25 @@ ptr_t inline __attribute__((always_inline)) stencil_time_skew(
             int neg_y_slope = y == y_start ? 0 : 1;
             int pos_y_slope = y + TY >= y_end ? 0 : -1;
 
+            int z_begin = z_start;
+            int z_stop = z_end;
+
+            int t_end = min(t + TT, nt);
+            int t_rounds = t_end - t;
+
             // do actual stencil
-            for (int tt = t; tt < min(t + TT, nt); tt++) {
+            for (int tt = t; tt < t_end; tt++) {
+
+                // in first round, only (t_rounds - 1) levels are needed, etc.
+                int ext_levels = t_rounds - 1 - (tt - t);
+
+                if (has_down) {
+                    z_begin = z_start - ext_levels;
+                }
+                if (has_up) {
+                    z_stop = z_end + ext_levels;
+                }
+
                 int y_begin = max(y_start, y - tt * neg_y_slope);
                 int y_stop = max(y_start, y_actual_end + tt * pos_y_slope);
 
@@ -292,7 +310,7 @@ ptr_t inline __attribute__((always_inline)) stencil_time_skew(
                 ptr_t c1 = bufferz[(tt + 1) % 2];
 
 #pragma omp parallel for collapse(1) schedule(static)
-                for (int zz = z_start; zz < z_end; zz++) {
+                for (int zz = z_begin; zz < z_stop; zz++) {
                     for (int yy = y_begin; yy < y_stop; yy++) {
                         stencil_inner_loop<USE_SIMD>(a0, a1, b0, b1, c0, c1, x_start, x_end, yy, zz, ldx, ldy, ldz);
                     }
