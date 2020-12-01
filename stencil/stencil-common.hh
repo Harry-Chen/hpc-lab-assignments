@@ -30,7 +30,7 @@
 #define BUF_SIZE (BUF_DIM_X * BUF_DIM_Y * BUF_DIM_Z)
 
 #define TRIVIAL_METHOD_THRESHOLD_OMP 1024
-#define TRIVIAL_METHOD_THRESHOLD_MPI 768
+#define TRIVIAL_METHOD_THRESHOLD_MPI 1024
 
 using std::max;
 using std::min;
@@ -236,18 +236,14 @@ void inline __attribute__((always_inline)) stencil_inner_loop(cptr_t a0, ptr_t a
     }
 };
 
-struct stencil_neighbour_t {
-    int rank = -1;
-    int recv_type = -1;
-    int send_type = -1;
-};
 
-#define NEIGHBOUR_NUM 2
-
-
-// parameters for tiling
+// parameters for tiling in Y
 #define TY 12
-#define TT 16
+
+// heuristic for tiling in T
+int inline __attribute__((always_inline)) get_t_block_size(int dim) {
+    return dim <= 512 ? 16 : 8;
+}
 
 struct do_nothing_t {
     void operator() (...) {}
@@ -260,10 +256,16 @@ template<bool USE_SIMD = true, typename F = do_nothing_t>
 ptr_t inline __attribute__((always_inline)) stencil_time_skew(
     int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, 
     int nt, int ldx, int ldy, int ldz,
-    ptr_t bufferx[2], ptr_t buffery[2], ptr_t bufferz[2],
+    ptr_t bufferx[2], ptr_t buffery[2], ptr_t bufferz[2], int TT,
     bool has_up = false, bool has_down = false,
     F&& mpi_callback = do_nothing_t()
 ) {
+
+    int zz_begin = z_start;
+    int zz_stop = z_end;
+
+    if (has_down) zz_begin -= (TT - 1);
+    if (has_up) zz_stop += (TT - 1);
 
     // blocking on t dimension
     for (int t = 0; t < nt; t += TT) {
@@ -273,14 +275,6 @@ ptr_t inline __attribute__((always_inline)) stencil_time_skew(
         // blocking on y dimension
         for (int y = y_start; y < y_end; y += TY) {
 
-            // int y_actual_end = min(y + TY, y_end);
-
-            int neg_y_slope = y == y_start ? 0 : 1;
-            int pos_y_slope = y + TY >= y_end ? 0 : -1;
-
-            int z_begin = z_start;
-            int z_stop = z_end;
-
             int t_end = min(t + TT, nt);
             int t_rounds = t_end - t;
 
@@ -288,19 +282,15 @@ ptr_t inline __attribute__((always_inline)) stencil_time_skew(
             for (int tt = t; tt < t_end; tt++) {
 
                 // in first round, only (t_rounds - 1) levels are needed, etc.
-                int ext_levels = t_rounds - 1 - (tt - t);
+                int ext_levels = tt - t;
 
-                if (has_down) {
-                    z_begin = z_start - ext_levels;
-                }
-                if (has_up) {
-                    z_stop = z_end + ext_levels;
-                }
+                int z_begin = has_down ? zz_begin + ext_levels : zz_begin;
+                int z_stop = has_up ? zz_stop - ext_levels : zz_stop;
 
-                int y_begin = max(y_start, y - tt * neg_y_slope);
-                int y_stop = min(y_end, y + TY + tt * pos_y_slope);
+                int y_begin = max(y_start, y - tt + t);
+                int y_stop = min(y_end, y + TY - tt + t);
                 if (y + TY >= y_end) y_stop = y_end;
-                if (y_begin == y_stop) continue;
+                if (y_begin >= y_stop) continue;
 
                 cptr_t a0 = bufferx[tt % 2];
                 ptr_t a1 = bufferx[(tt + 1) % 2];

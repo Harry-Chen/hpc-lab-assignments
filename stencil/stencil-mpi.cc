@@ -51,7 +51,7 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
 
     int halo_size_x = 1;
     int halo_size_y = 1;
-    int halo_size_z = grid_info->global_size_z < TRIVIAL_METHOD_THRESHOLD_MPI ? TT + 1 : BT + 1;
+    int halo_size_z = grid_info->global_size_z < TRIVIAL_METHOD_THRESHOLD_MPI ? get_t_block_size(grid_info->global_size_x) : BT + 1;
 
     // config grid info
     grid_info->local_size_x = local_size_x;
@@ -67,44 +67,6 @@ void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     grid_info->halo_size_z = halo_size_z;
 
     // fprintf(stderr, "Rank %d offset x %d y %d z %d\n", rank, grid_info->offset_x, grid_info->offset_y, grid_info->offset_z);
-
-    // size of local data
-    int local_sizes[3] = {local_size_x + 2 * halo_size_x, local_size_y + 2 * halo_size_y, local_size_z + 2 * halo_size_z};
-    int sub_sizes[3] = {local_size_x, local_size_y, halo_size_z};
-
-    auto neighbours = new stencil_neighbour_t[NEIGHBOUR_NUM]();
-    grid_info->additional_info = neighbours;
-
-    // calculate neighbour information along z axis
-    if (rank < ranks - 1) {
-        neighbours[0].rank = rank + 1;
-        int starts[3] = {halo_size_x, halo_size_y, local_size_z + halo_size_z};
-        int comm_type;
-        // data to receive (from remote data to local halo)
-        MPI_Type_create_subarray(3, local_sizes, sub_sizes, starts, MPI_ORDER_FORTRAN, MPI_DOUBLE, &comm_type);
-        MPI_Type_commit(&comm_type);
-        neighbours[0].recv_type = comm_type;
-        // data to receive (from local data to remote halo)
-        starts[2] = local_size_z;
-        MPI_Type_create_subarray(3, local_sizes, sub_sizes, starts, MPI_ORDER_FORTRAN, MPI_DOUBLE, &comm_type);
-        MPI_Type_commit(&comm_type);
-        neighbours[0].send_type = comm_type;
-    }
-    if (rank > 0) {
-        neighbours[1].rank = rank - 1;
-        int starts[3] = {halo_size_x, halo_size_y, 0};
-        int comm_type;
-        // data to receive (from remote data to local halo)
-        MPI_Type_create_subarray(3, local_sizes, sub_sizes, starts, MPI_ORDER_FORTRAN, MPI_DOUBLE, &comm_type);
-        MPI_Type_commit(&comm_type);
-        neighbours[1].recv_type = comm_type;
-        // data to receive (from local data to remote halo)
-        starts[2] = halo_size_z;
-        MPI_Type_create_subarray(3, local_sizes, sub_sizes, starts, MPI_ORDER_FORTRAN, MPI_DOUBLE, &comm_type);
-        MPI_Type_commit(&comm_type);
-        neighbours[1].send_type = comm_type;
-    }
-
     load_stencil_coefficients();
 }
 
@@ -112,28 +74,53 @@ void destroy_dist_grid(dist_grid_info_t *grid_info) {
 
 }
 
-void inline __attribute__((always_inline)) exchange_data(ptr_t a0, ptr_t b0, ptr_t c0, stencil_neighbour_t *neighbours) {
-        // exchange data between neighbours to current buffer
-        MPI_Request requests[NEIGHBOUR_NUM][3 * 2];
-#pragma unroll(NEIGHBOUR_NUM)
-        for (int i = 0; i < NEIGHBOUR_NUM; ++i) {
-            if (neighbours[i].rank != -1) {
-                MPI_Isend(a0, 1, neighbours[i].send_type, neighbours[i].rank, 0, MPI_COMM_WORLD, &requests[i][0]);
-                MPI_Isend(b0, 1, neighbours[i].send_type, neighbours[i].rank, 0, MPI_COMM_WORLD, &requests[i][1]);
-                MPI_Isend(c0, 1, neighbours[i].send_type, neighbours[i].rank, 0, MPI_COMM_WORLD, &requests[i][2]);
-                MPI_Irecv(a0, 1, neighbours[i].recv_type, neighbours[i].rank, 0, MPI_COMM_WORLD, &requests[i][3]);
-                MPI_Irecv(b0, 1, neighbours[i].recv_type, neighbours[i].rank, 0, MPI_COMM_WORLD, &requests[i][4]);
-                MPI_Irecv(c0, 1, neighbours[i].recv_type, neighbours[i].rank, 0, MPI_COMM_WORLD, &requests[i][5]);
-            }
-        }
+static MPI_Request send_upper_req[3], recv_lower_req[3], send_lower_req[3], recv_upper_req[3];
 
-        // wait for all communication to finish
-#pragma unroll(NEIGHBOUR_NUM)
-        for (int i = 0; i < NEIGHBOUR_NUM; ++i) {
-            if (neighbours[i].rank != -1) {
-                MPI_Waitall(6, requests[i], MPI_STATUSES_IGNORE);
-            }
-        }
+inline void exchange_data(cptr_t A, cptr_t B, cptr_t C, int z_start, int z_end, int ldx, int ldy, int height, const dist_grid_info_t *grid_info) {
+    // send last several elements
+    int rank = grid_info->p_id;
+    int upper_rank = grid_info->p_id + 1;
+    int lower_rank = grid_info->p_id - 1;
+
+    // receive from lower
+    if (rank != 0) {
+        MPI_Irecv((void*)(A + INDEX(0, 0, 0, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, lower_rank, 0, MPI_COMM_WORLD, recv_lower_req);
+        MPI_Irecv((void*)(B + INDEX(0, 0, 0, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, lower_rank, 1, MPI_COMM_WORLD, recv_lower_req + 1);
+        MPI_Irecv((void*)(C + INDEX(0, 0, 0, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, lower_rank, 2, MPI_COMM_WORLD, recv_lower_req + 2);
+    } 
+    
+    // send to upper
+    if (rank != grid_info->p_num - 1) {
+        MPI_Isend((void*)(A + INDEX(0, 0, z_end - height, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, upper_rank, 0, MPI_COMM_WORLD, send_upper_req);
+        MPI_Isend((void*)(B + INDEX(0, 0, z_end - height, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, upper_rank, 1, MPI_COMM_WORLD, send_upper_req + 1);
+        MPI_Isend((void*)(C + INDEX(0, 0, z_end - height, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, upper_rank, 2, MPI_COMM_WORLD, send_upper_req + 2);
+    }
+
+    // receive from upper
+    if (rank != grid_info->p_num - 1) {
+        MPI_Irecv((void*)(A + INDEX(0, 0, z_end, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, upper_rank, 3, MPI_COMM_WORLD, recv_upper_req);
+        MPI_Irecv((void*)(B + INDEX(0, 0, z_end, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, upper_rank, 4, MPI_COMM_WORLD, recv_upper_req + 1);
+        MPI_Irecv((void*)(C + INDEX(0, 0, z_end, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, upper_rank, 5, MPI_COMM_WORLD, recv_upper_req + 2);
+    } 
+    
+    // send to lower
+    if (rank != 0) {
+        MPI_Isend((void*)(A + INDEX(0, 0, z_start, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, lower_rank, 3, MPI_COMM_WORLD, send_lower_req);
+        MPI_Isend((void*)(B + INDEX(0, 0, z_start, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, lower_rank, 4, MPI_COMM_WORLD, send_lower_req + 1);
+        MPI_Isend((void*)(C + INDEX(0, 0, z_start, ldx, ldy)), ldx * ldy * height, MPI_DOUBLE, lower_rank, 5, MPI_COMM_WORLD, send_lower_req + 2);
+    }
+
+    // wait for lower communication
+    if (rank != 0) {
+        MPI_Waitall(3, recv_lower_req, MPI_STATUSES_IGNORE);
+        MPI_Waitall(3, send_lower_req, MPI_STATUSES_IGNORE);
+    }
+    
+    // wait for upper communication
+    if (rank != grid_info->p_num - 1) {
+        MPI_Waitall(3, recv_upper_req, MPI_STATUSES_IGNORE);
+        MPI_Waitall(3, send_upper_req, MPI_STATUSES_IGNORE);
+    }
 }
 
 
@@ -141,7 +128,7 @@ ptr_t inline __attribute__((always_inline)) stencil_trivial(
     int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, 
     int nt, int ldx, int ldy, int ldz,
     ptr_t bufferx[2], ptr_t buffery[2], ptr_t bufferz[2],
-    bool has_down, bool has_up, stencil_neighbour_t *neighbours
+    bool has_down, bool has_up, const dist_grid_info_t *grid_info
 ) {
     
     // return array
@@ -161,7 +148,7 @@ ptr_t inline __attribute__((always_inline)) stencil_trivial(
         ptr_t c0 = bufferz[t % 2];
         ptr_t c1 = bufferz[(t + 1) % 2];
         
-        exchange_data(a0, b0, c0, neighbours);
+        exchange_data(a0, b0, c0, z_start, z_end, ldx, ldy, BT + 1, grid_info);
         
 #pragma omp parallel for collapse(2) schedule(static)
         for (int z = z_start; z < z_end; z += BZ) {
@@ -244,8 +231,6 @@ ptr_t inline __attribute__((always_inline)) stencil_trivial(
 // benchmark entrypoint
 ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, const dist_grid_info_t *grid_info, int nt) {
   
-    auto neighbours = (stencil_neighbour_t *) grid_info->additional_info;
-
     ptr_t bufferx[2] = {A0, A1};
     ptr_t buffery[2] = {B0, B1};
     ptr_t bufferz[2] = {C0, C1};
@@ -259,15 +244,18 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     int ldz = grid_info->local_size_z + 2 * grid_info->halo_size_z;
     bool has_up = grid_info->p_id < grid_info->p_num - 1, has_down = grid_info->p_id > 0;
 
+    int TT = get_t_block_size(grid_info->global_size_x);
+
     if (grid_info->global_size_x < TRIVIAL_METHOD_THRESHOLD_MPI) {
         return stencil_time_skew<true>(
-            x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz, has_up, has_down,
-            [neighbours] (auto a, auto b, auto c) __attribute__((always_inline)) {
-                exchange_data(a, b, c, neighbours);
-            }
-        );
+            x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz,
+            bufferx, buffery, bufferz, TT, has_up, has_down,
+            [=](auto a, auto b, auto c)
+                __attribute__((always_inline)) {
+                    exchange_data(a, b, c, z_start, z_end, ldx, ldy, TT, grid_info);
+                });
     } else {
-        return stencil_trivial(x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz, has_down, has_up, neighbours);
+        return stencil_trivial(x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz, bufferx, buffery, bufferz, has_down, has_up, grid_info);
     }
 
 }
