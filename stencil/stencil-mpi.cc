@@ -10,6 +10,10 @@
 
 extern "C" const char* version_name = "Optimized version (MPI + OpenMP)";
 
+#ifndef _OPENMP
+#error This file must be compiled with OpenMP
+#endif
+
 void create_dist_grid(dist_grid_info_t *grid_info, int stencil_type) {
     
     int ranks = grid_info->p_num, rank = grid_info->p_id;
@@ -74,13 +78,15 @@ void destroy_dist_grid(dist_grid_info_t *grid_info) {
 
 }
 
-static MPI_Request send_upper_req[3], recv_lower_req[3], send_lower_req[3], recv_upper_req[3];
 
+// exchange halo data with other ranks
 inline void exchange_data(cptr_t A, cptr_t B, cptr_t C, int z_start, int z_end, int ldx, int ldy, int height, const dist_grid_info_t *grid_info) {
     // send last several elements
     int rank = grid_info->p_id;
     int upper_rank = grid_info->p_id + 1;
     int lower_rank = grid_info->p_id - 1;
+
+    static MPI_Request send_upper_req[3], recv_lower_req[3], send_lower_req[3], recv_upper_req[3];
 
     // receive from lower
     if (rank != 0) {

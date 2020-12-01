@@ -244,9 +244,10 @@ int inline __attribute__((always_inline)) get_y_block_size(int dim) {
 
 // heuristic for tiling in T
 int inline __attribute__((always_inline)) get_t_block_size(int dim) {
-    return 16;
+    return dim <= 512 ? 16 : 12;
 }
 
+// default callback, do nothing as its name
 struct do_nothing_t {
     void operator() (...) {}
 };
@@ -269,12 +270,14 @@ ptr_t inline __attribute__((always_inline)) stencil_time_skew(
     int TT = get_t_block_size(dim);
     int TY = get_y_block_size(dim);
 
+    // calculate in halo (data from other ranks)
     if (has_down) zz_begin -= (TT - 1);
     if (has_up) zz_stop += (TT - 1);
 
     // blocking on t dimension
     for (int t = 0; t < nt; t += TT) {
 
+        // exchange data with other ranks
         mpi_callback(bufferx[t % 2], buffery[t % 2], bufferz[t % 2]);
 
         // blocking on y dimension
@@ -289,6 +292,7 @@ ptr_t inline __attribute__((always_inline)) stencil_time_skew(
                 // in first round, only (t_rounds - 1) levels are needed, etc.
                 int ext_levels = tt - t;
 
+                // range of z & y that actually needs to be computed
                 int z_begin = has_down ? zz_begin + ext_levels : zz_begin;
                 int z_stop = has_up ? zz_stop - ext_levels : zz_stop;
 
