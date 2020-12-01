@@ -238,11 +238,13 @@ void inline __attribute__((always_inline)) stencil_inner_loop(cptr_t a0, ptr_t a
 
 
 // parameters for tiling in Y
-#define TY 12
+int inline __attribute__((always_inline)) get_y_block_size(int dim) {
+    return dim <= 512 ? 12 : 8;
+}
 
 // heuristic for tiling in T
 int inline __attribute__((always_inline)) get_t_block_size(int dim) {
-    return dim <= 512 ? 16 : 8;
+    return 16;
 }
 
 struct do_nothing_t {
@@ -256,13 +258,16 @@ template<bool USE_SIMD = true, typename F = do_nothing_t>
 ptr_t inline __attribute__((always_inline)) stencil_time_skew(
     int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, 
     int nt, int ldx, int ldy, int ldz,
-    ptr_t bufferx[2], ptr_t buffery[2], ptr_t bufferz[2], int TT,
+    ptr_t bufferx[2], ptr_t buffery[2], ptr_t bufferz[2], int dim,
     bool has_up = false, bool has_down = false,
     F&& mpi_callback = do_nothing_t()
 ) {
 
     int zz_begin = z_start;
     int zz_stop = z_end;
+
+    int TT = get_t_block_size(dim);
+    int TY = get_y_block_size(dim);
 
     if (has_down) zz_begin -= (TT - 1);
     if (has_up) zz_stop += (TT - 1);

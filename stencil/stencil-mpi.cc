@@ -249,7 +249,7 @@ ptr_t stencil_7(ptr_t A0, ptr_t A1, ptr_t B0, ptr_t B1, ptr_t C0, ptr_t C1, cons
     if (grid_info->global_size_x < TRIVIAL_METHOD_THRESHOLD_MPI) {
         return stencil_time_skew<true>(
             x_start, x_end, y_start, y_end, z_start, z_end, nt, ldx, ldy, ldz,
-            bufferx, buffery, bufferz, TT, has_up, has_down,
+            bufferx, buffery, bufferz, grid_info->global_size_x, has_up, has_down,
             [=](auto a, auto b, auto c)
                 __attribute__((always_inline)) {
                     exchange_data(a, b, c, z_start, z_end, ldx, ldy, TT, grid_info);
