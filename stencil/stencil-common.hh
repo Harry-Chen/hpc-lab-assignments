@@ -272,13 +272,15 @@ ptr_t inline __attribute__((always_inline)) stencil_time_skew(
         // blocking on y dimension
         for (int y = y_start; y < y_end; y += TY) {
 
-            int neg_y_slope = y == 1 ? 0 : 1;
-            int pos_y_slope = y == y_end - TY ? 0 : -1;
+            int y_actual_end = min(y + TY, y_end);
+
+            int neg_y_slope = y == y_start ? 0 : 1;
+            int pos_y_slope = y + TY >= y_end ? 0 : -1;
 
             // do actual stencil
             for (int tt = t; tt < min(t + TT, nt); tt++) {
                 int y_begin = max(y_start, y - tt * neg_y_slope);
-                int y_stop = max(y_start, y + TY + tt * pos_y_slope);
+                int y_stop = max(y_start, y_actual_end + tt * pos_y_slope);
 
                 cptr_t a0 = bufferx[tt % 2];
                 ptr_t a1 = bufferx[(tt + 1) % 2];
