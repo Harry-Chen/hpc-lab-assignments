@@ -13,7 +13,7 @@ else
   DATAPATH="/home/course/HW/spmv_data"
 fi
 
-SRUN=$(which SRUN)
+SRUN=$(which srun)
 
 if [ -x "$SRUN" ]; then
     EXEC_PREFIX="$SRUN -N 1 --partition=gpu --exclusive --pty"
