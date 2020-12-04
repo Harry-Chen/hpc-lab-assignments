@@ -1,12 +1,12 @@
-CUDAC = nvcc
+CUDA_HOME ?= /usr/local/cuda
+NVCC = $(CUDA_HOME)/bin/nvcc
 
-CUDAOPT =
+CUDAOPT = -O3
+CUDAFLAGS = $(CUDAOPT) -g -std=c++14
 
-CUDAFLAGS = $(CUDAOPT)
-
-CUDAPATH = /usr/local/cuda/lib64
+CUDALIB = $(CUDA_HOME)/lib64
 LDFLAGS = 
-LDLIBS = $(LDFLAGS) -L$(CUDAPATH) -L$(CUDAPATH)/stubs -lcuda -lcudart
+LDLIBS = $(LDFLAGS) -L$(CUDALIB) -L$(CUDALIB)/stubs -lcuda -lcudart
 
 targets =  benchmark-cusparse benchmark-optimized
 commonobj = utils.o benchmark.o
@@ -16,22 +16,22 @@ objects = $(commonobj) sptrsv-cusparse.o sptrsv-optimized.o
 default : all
 
 .PHONY : all
-all : clean $(targets)
+all : $(targets)
 
 benchmark.o : benchmark.cu common.h utils.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 utils.o : utils.cu common.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 
 sptrsv-cusparse.o : sptrsv-cusparse.cu common.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 benchmark-cusparse : $(commonobj) sptrsv-cusparse.o
-	$(CUDAC) -o $@ $^ $(LDLIBS) -lcusparse
+	$(NVCC) -o $@ $^ $(LDLIBS) -lcusparse
 
 sptrsv-optimized.o : sptrsv-optimized.cu common.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 benchmark-optimized : $(commonobj) sptrsv-optimized.o
-	$(CUDAC) -o $@ $^ $(LDLIBS)
+	$(NVCC) -o $@ $^ $(LDLIBS)
 
 .PHONY: clean
 clean:
