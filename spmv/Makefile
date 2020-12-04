@@ -1,12 +1,12 @@
-CUDAC = nvcc
+CUDA_HOME ?= /usr/local/cuda
+NVCC = $(CUDA_HOME)/bin/nvcc
 
-CUDAOPT =
+CUDAOPT = -O3
+CUDAFLAGS = $(CUDAOPT) -g -std=c++14
 
-CUDAFLAGS = $(CUDAOPT)
-
-CUDAPATH = /usr/local/cuda/lib64
+CUDALIB = $(CUDA_HOME)/lib64
 LDFLAGS = 
-LDLIBS = $(LDFLAGS) -L$(CUDAPATH) -L$(CUDAPATH)/stubs -lcuda -lcudart
+LDLIBS = $(LDFLAGS) -L$(CUDALIB) -L$(CUDALIB)/stubs -lcuda -lcudart
 
 targets =  benchmark-cusparse benchmark-naive benchmark-optimized
 commonobj = utils.o benchmark.o
@@ -16,27 +16,27 @@ objects = $(commonobj) spmv-cusparse.o spmv-naive.o spmv-optimized.o
 default : all
 
 .PHONY : all
-all : clean $(targets)
+all : $(targets)
 
 benchmark.o : benchmark.cu common.h utils.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 utils.o : utils.cu common.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 
 spmv-cusparse.o : spmv-cusparse.cu common.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 benchmark-cusparse : $(commonobj) spmv-cusparse.o
-	$(CUDAC) -o $@ $^ $(LDLIBS) -lcusparse
+	$(NVCC) -o $@ $^ $(LDLIBS) -lcusparse
 
 spmv-naive.o : spmv-naive.cu common.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 benchmark-naive : $(commonobj) spmv-naive.o
-	$(CUDAC) -o $@ $^ $(LDLIBS)
+	$(NVCC) -o $@ $^ $(LDLIBS)
 
 spmv-optimized.o : spmv-optimized.cu common.h
-	$(CUDAC) -c $(CUDAFLAGS) $< -o $@
+	$(NVCC) -c $(CUDAFLAGS) $< -o $@
 benchmark-optimized : $(commonobj) spmv-optimized.o
-	$(CUDAC) -o $@ $^ $(LDLIBS)
+	$(NVCC) -o $@ $^ $(LDLIBS)
 
 .PHONY: clean
 clean:
