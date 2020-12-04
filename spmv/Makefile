@@ -1,12 +1,4 @@
-CUDA_HOME ?= /usr/local/cuda
-NVCC = $(CUDA_HOME)/bin/nvcc
-
-CUDAOPT = -O3
-CUDAFLAGS = $(CUDAOPT) -g -std=c++14
-
-CUDALIB = $(CUDA_HOME)/lib64
-LDFLAGS = 
-LDLIBS = $(LDFLAGS) -L$(CUDALIB) -L$(CUDALIB)/stubs -lcuda -lcudart
+include ../gpu.makefrag
 
 targets =  benchmark-cusparse benchmark-naive benchmark-optimized
 commonobj = utils.o benchmark.o
