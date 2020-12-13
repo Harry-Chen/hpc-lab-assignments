@@ -6,9 +6,14 @@
 #include "common.h"
 #include "utils.h"
 
-#define GRID_SIZE 16
+#ifndef GRID_SIZE
+#define GRID_SIZE 256
+#endif
+
+#ifndef BLOCK_SIZE
 #define BLOCK_SIZE 1024
-#define THREAD_NUM (GRID_SIZE * BLOCK_SIZE)
+#endif
+
 
 const char* version_name = "optimized version";
 
@@ -28,7 +33,7 @@ __global__ void spmv_merge_based_kernel(int m, int nnz, int ntasks_per_thread,
 
     index_t curr_row = 0, count = m;
 
-    while (count > 0) {
+    while (count > 0) {d
         index_t pos = curr_row;
         index_t step = count >> 1;
         pos += step;
@@ -73,10 +78,11 @@ void spmv(dist_matrix_t *mat, const data_t *__restrict__ x, data_t *__restrict__
 
     int m = mat->global_m;
     int n = mat->global_nnz;
-    int ntasks_per_thread = ceiling(m + n, THREAD_NUM);
 
     dim3 grid_size(GRID_SIZE, 1, 1);
     dim3 block_size(BLOCK_SIZE, 1, 1);
+
+    int ntasks_per_thread = ceiling(m + n, GRID_SIZE * BLOCK_SIZE);
 
     spmv_merge_based_kernel<<<grid_size, block_size>>>(m, n, ntasks_per_thread, mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, x, y);
 }
