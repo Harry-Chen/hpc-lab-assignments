@@ -33,7 +33,7 @@ __global__ void spmv_merge_based_kernel(int m, int nnz, int ntasks_per_thread,
 
     index_t curr_row = 0, count = m;
 
-    while (count > 0) {d
+    while (count > 0) {
         index_t pos = curr_row;
         index_t step = count >> 1;
         pos += step;
