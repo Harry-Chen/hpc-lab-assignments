@@ -27,10 +27,6 @@ __global__ void spmv_naive_kernel(int m, const index_t *r_pos, \
     }
 }
 
-inline int ceiling(int num, int den) {
-    return (num - 1) / den + 1;
-}
-
 void spmv(dist_matrix_t *mat, const data_t* x, data_t* y) {
     int m = mat->global_m;
     dim3 grid_size (ceiling(m, 512), 1, 1);

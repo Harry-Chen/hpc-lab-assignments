@@ -1,6 +1,9 @@
 #ifndef UTILS_H_INCLUDED
 #define UTILS_H_INCLUDED 1
 
+#include <stdio.h>
+#include <assert.h>
+
 #include "common.h"
 
 #define CHECK(err, err_code) if(err) { return err_code; }
@@ -27,4 +30,33 @@ int check_answer(dist_matrix_t *mat, const char* filename, data_t* y);
 #define NO_MEM cudaErrorMemoryAllocation
 #define IO_ERR 3
 
+#define CUDA_CHECK(condition) \
+  /* Code block avoids redefinition of cudaError_t error */ \
+  do { \
+    cudaError_t error = (condition); \
+    if (error != cudaSuccess) { \
+        fprintf(stderr, "CUDA error %d: %s\n", error, cudaGetErrorString(error)); \
+        assert(error == cudaSuccess); \
+    } \
+  } while (0)
+
+#endif
+
+#if __CUDA_ARCH__ < 600
+__device__ inline double atomicAddDouble(double* address, double val) {
+    unsigned long long int* address_as_ull =
+                              (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed,
+                        __double_as_longlong(val +
+                               __longlong_as_double(assumed)));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+}
 #endif

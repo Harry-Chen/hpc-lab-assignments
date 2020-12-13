@@ -2,4 +2,10 @@
 
 source ./spmv_common.sh $*
 
-${EXEC_PREFIX} ${EXECUTABLE} ${REP} ${DATAPATH}/parabolic_fem.csr
+DATA=$2
+
+if [ -z $DATA ]; then
+    DATA=parabolic_fem.csr
+fi
+
+${EXEC_PREFIX} ${EXECUTABLE} ${REP} ${DATAPATH}/${DATA}
