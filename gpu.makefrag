@@ -2,7 +2,7 @@ CUDA_HOME ?= /usr/local/cuda
 NVCC = $(CUDA_HOME)/bin/nvcc
 
 CUDAOPT = -Xptxas -O3 -arch=compute_35
-CUDAFLAGS = $(CUDAOPT) -g -std=c++11 $(CUDAFLAGS)
+CUDAFLAGS = $(CUDAOPT) -g -std=c++11 $(CXXFLAGS)
 
 CUDALIB = $(CUDA_HOME)/lib64
 LDFLAGS = 
