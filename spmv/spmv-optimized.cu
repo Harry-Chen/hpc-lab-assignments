@@ -69,21 +69,22 @@ __global__ void spmv_merge_based_kernel(int m, int nnz, int ntasks_per_thread,
 
     index_t curr_row = row_offsets[i], curr_index = index_offsets[i];
     int ntasks = MIN(ntasks_per_thread, m + nnz - curr_row - curr_index); // task number for each thread
+    bool self_row = curr_index == r_pos[curr_row];
 
     data_t res = 0.0;
  
     if (curr_row < m && curr_index < nnz) {
+#pragma unroll
         for (int t = 0; t < ntasks; ++t) {
-            // int remain_tasks = ntasks - t;
             if (curr_index == r_pos[curr_row + 1]) {
                 // end of a row, aggregate
-                // if (full_row) { // current thread fully calculates this row
-                //     y[curr_row] = res;
-                // } else {
-                //     atomicAdd(y[curr_row], res); 
-                // }
-                atomicAddDouble(&y[curr_row], res);
+                if (self_row) { // current thread fully calculates this row
+                    y[curr_row] = res;
+                } else {
+                    atomicAddDouble(&y[curr_row], res);
+                }
                 curr_row++;
+                self_row = true;
                 res = 0.0;
             } else {
                 res += x[c_idx[curr_index]] * values[curr_index];
