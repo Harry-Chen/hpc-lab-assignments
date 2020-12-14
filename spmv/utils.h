@@ -43,6 +43,7 @@ int check_answer(dist_matrix_t *mat, const char* filename, data_t* y);
 #endif
 
 #if __CUDA_ARCH__ < 600
+#define ATOMIC_ADD_DOUBLE atomicAddDouble
 __device__ inline double atomicAddDouble(double* address, double val) {
     unsigned long long int* address_as_ull =
                               (unsigned long long int*)address;
@@ -59,4 +60,6 @@ __device__ inline double atomicAddDouble(double* address, double val) {
 
     return __longlong_as_double(old);
 }
+#else
+#define ATOMIC_ADD_DOUBLE atomicAdd
 #endif

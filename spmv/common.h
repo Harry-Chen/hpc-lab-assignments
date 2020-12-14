@@ -11,8 +11,15 @@ typedef double data_t;
 typedef void (*free_func_t)(void*);
 
 typedef struct {
-    index_t *row_offsets, *index_offsets;
+    index_t *sorted_offset, *row_index, *row_task_num;
+    index_t *c_idx_sorted;
+    data_t *values_sorted;
 } csr_info_t;
+
+typedef struct {
+    index_t row;
+    index_t task_num;
+} task_info_t;
 
 /* 
  * global_m: number of rows in the whole input matrix
