@@ -32,9 +32,9 @@ typedef struct {
 typedef struct {
     int global_m, global_nnz;             /* do not modify */
     
-    index_t* r_pos;
-    index_t* c_idx;
-    data_t* values;
+    index_t *r_pos;
+    index_t *c_idx;
+    data_t *values;
     free_func_t CPU_free;
 
     index_t *__restrict__ gpu_r_pos;
@@ -42,6 +42,7 @@ typedef struct {
     data_t *__restrict__ gpu_values;
     free_func_t GPU_free;
 
+    int max_nnz;
     void *additional_info;         /* any information you want to attach */
 } dist_matrix_t;
 

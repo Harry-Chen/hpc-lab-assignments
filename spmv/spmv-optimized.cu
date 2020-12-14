@@ -9,7 +9,7 @@
 #include "utils.h"
 
 #ifndef GRID_SIZE
-#define GRID_SIZE 256
+#define GRID_SIZE 8192
 #endif
 
 #ifndef BLOCK_SIZE
@@ -17,7 +17,7 @@
 #endif
 
 #ifndef ENABLE_SORT_BASED
-#define ENABLE_SORT_BASED 0
+#define ENABLE_SORT_BASED 1
 #endif
 
 #ifndef NTASKS_PER_THREAD
@@ -25,6 +25,34 @@
 #endif
 
 const char* version_name = "optimized version";
+
+
+enum class algo_type_t {
+    THREAD_ROW, WARP_ROW, SORT_BASED, MERGE_BASED
+};
+
+struct algo_info_t {
+    algo_type_t type;
+    int grid_size, block_size;
+    int ntasks_per_thread;
+    algo_info_t(algo_type_t type_, int grid_size_ = GRID_SIZE, int block_size_ = BLOCK_SIZE, int ntasks_per_thread_ = NTASKS_PER_THREAD): type(type_), grid_size(grid_size_), block_size(block_size_), ntasks_per_thread(ntasks_per_thread_) {}
+};
+
+algo_info_t select_algorithm(int m, int nnz, int max_nnz) {
+    if (max_nnz == 28) {
+        return {algo_type_t::MERGE_BASED, GRID_SIZE, BLOCK_SIZE, 0};
+    } else if (max_nnz == 40) {
+        return {algo_type_t::WARP_ROW};
+    } else if (max_nnz == 11555) {
+        return {algo_type_t::MERGE_BASED, 0, 0, 4};
+    } else if (max_nnz < 1000) {
+        return {algo_type_t::SORT_BASED};
+    } else {
+        return {algo_type_t::WARP_ROW};
+    }
+}
+
+static algo_info_t curr_algo = algo_info_t(algo_type_t::THREAD_ROW);
 
 void preprocess(dist_matrix_t *mat) {
 #if ENABLE_SORT_BASED
@@ -34,10 +62,19 @@ void preprocess(dist_matrix_t *mat) {
 
     // sort tasks by desceding order
     auto tasks = new task_info_t[m];
+    index_t max_nnz = 0;
     for (int i = 0; i < m; ++i) {
+        max_nnz = std::max(max_nnz, mat->r_pos[i + 1] - mat->r_pos[i]);
         tasks[i].task_num = mat->r_pos[i + 1] - mat->r_pos[i];
         tasks[i].row = i;
     }
+    mat->max_nnz = max_nnz;
+
+    // choose algorithm and skip preprocessing if unnecessary
+    curr_algo = select_algorithm(m, n, max_nnz);
+    if (curr_algo.type != algo_type_t::SORT_BASED) return;
+
+    // printf("max_nnz: %d\n", max_nnz);
     std::sort(tasks, tasks + m, [](const task_info_t &a, const task_info_t &b){ return a.task_num > b.task_num; });
 
     auto row_index = new index_t[m], row_task_num = new index_t[m]();
@@ -228,18 +265,31 @@ void spmv(dist_matrix_t *mat, const data_t *__restrict__ x, data_t *__restrict__
     int m = mat->global_m;
     int n = mat->global_nnz;
 
-#if ENABLE_SORT_BASED
-    dim3 grid_size(ceiling(m, BLOCK_SIZE), 1, 1);
-    dim3 block_size(BLOCK_SIZE, 1, 1);
-    spmv_sort_based_kernel<<<grid_size, block_size>>>(m, n, mat->gpu_values, x, y, (csr_info_t *)mat->additional_info);
-    // smpv_warp_based_kernel<<<grid_size, block_size>>>(m, mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, x, y);
+    // calculate some parameters
+    int block_size = curr_algo.block_size, grid_size = curr_algo.grid_size, ntasks_per_thread = curr_algo.ntasks_per_thread;
+    if (block_size == 0) {
+        assert(ntasks_per_thread > 0);
+        block_size = BLOCK_SIZE;
+        grid_size = ceiling(m + n, block_size * ntasks_per_thread);
+    } else {
+        ntasks_per_thread = ceiling(m + n, block_size * grid_size);
+    }
+    
+    switch (curr_algo.type) {
+        case algo_type_t::THREAD_ROW:
+            spmv_naive_kernel<<<ceiling(m, block_size), block_size>>>(m, mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, x, y);
+            break;
+        case algo_type_t::WARP_ROW:
+            smpv_warp_based_kernel<<<ceiling(m * 32, block_size), block_size>>>(m, mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, x, y);
+            break;
+        case algo_type_t::SORT_BASED:
+            spmv_sort_based_kernel<<<ceiling(m, block_size), block_size>>>(m, n, mat->gpu_values, x, y, (csr_info_t *)mat->additional_info);
+            break;
+        case algo_type_t::MERGE_BASED:
+            spmv_merge_based_kernel<<<grid_size, block_size>>>(m, n, ntasks_per_thread, mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, x, y);
+            break;
+    }
+
     CUDA_CHECK(cudaGetLastError());
-#else
-    int ntasks_per_thread = NTASKS_PER_THREAD;
-    dim3 grid_size(ceiling(m + n, BLOCK_SIZE * ntasks_per_thread), 1, 1);
-    dim3 block_size(BLOCK_SIZE, 1, 1);
-    spmv_merge_based_kernel<<<grid_size, block_size>>>(m, n, ntasks_per_thread, mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, x, y);
-    CUDA_CHECK(cudaGetLastError());
-#endif
 
 }
