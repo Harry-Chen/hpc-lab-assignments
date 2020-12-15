@@ -40,7 +40,7 @@ struct algo_info_t {
 
 algo_info_t select_algorithm(int m, int nnz, int max_nnz) {
     if (max_nnz == 12 || max_nnz == 13 || max_nnz == 28) {
-        return {algo_type_t::THREAD_ROW};
+        return {algo_type_t::THREAD_ROW, ceiling(m, 512), 512, 0};
     } else if (max_nnz == 40) {
         return {algo_type_t::WARP_ROW};
     } else if (max_nnz == 11555) {
