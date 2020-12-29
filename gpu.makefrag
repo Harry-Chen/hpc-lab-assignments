@@ -2,7 +2,7 @@ CUDA_HOME ?= /usr/local/cuda
 NVCC = $(CUDA_HOME)/bin/nvcc
 
 CUDAOPT = -O3 -Xptxas -v -Wno-deprecated-declarations
-CUDAFLAGS = $(CUDAOPT) -g -G -std=c++11 $(CXXFLAGS)
+CUDAFLAGS = $(CUDAOPT) -g -std=c++11 $(CXXFLAGS)
 
 CUDALIB = $(CUDA_HOME)/lib64
 LDFLAGS = 
