@@ -12,8 +12,8 @@ typedef double data_t;
 typedef void (*free_func_t)(void*);
 
 typedef struct {
-    int *get_value;
-    int *id_getter;
+    int *finished;
+    int *curr_row;
 } sptrsv_info_t;
 
 /* 
