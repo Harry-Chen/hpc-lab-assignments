@@ -2,4 +2,10 @@
 
 source ./sptrsv_common.sh $*
 
-${EXEC_PREFIX} ${EXECUTABLE} ${REP} ${DATAPATH}/2cubes_sphere.nd_chol.csr
+DATA=$2
+
+if [ -z $DATA ]; then
+    DATA=2cubes_sphere.nd_chol.csr
+fi
+
+${EXEC_PREFIX} ${EXECUTABLE} ${REP} ${DATAPATH}/${DATA}

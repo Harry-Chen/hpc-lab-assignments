@@ -34,9 +34,9 @@ int main(int argc, char **argv) {
     ABORT_IF_ERROR(ret)
 
     printf("Benchmarking %s on %s.\n", version_name, argv[2]);
-    printf(INDENT"%d x %d, %d non-zeros, %d run(s)\n", \
+    printf(INDENT "%d x %d, %d non-zeros, %d run(s)\n", \
             mat.global_m, mat.global_m, mat.global_nnz, reps);
-    printf(INDENT"Preprocessing.\n");
+    printf(INDENT "Preprocessing.\n");
     
     gettimeofday(&start, NULL);
     preprocess(&mat);
@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
     /* warm up */
     printf(INDENT"Warming up.\n");
     sptrsv(&mat, b, x);
-    
+    cudaDeviceSynchronize();
 
     printf(INDENT"Testing.\n");
     for(i = 0; i < reps; ++i) {
@@ -74,9 +74,9 @@ int main(int argc, char **argv) {
     printf(INDENT"Checking.\n");
     ret = check_answer(&mat, argv[2], cpu_buffer);
     if(ret == 0) {
-        printf("\e[1;32m"INDENT"Result validated.\e[0m\n");
+        printf("\e[1;32m" INDENT "Result validated.\e[0m\n");
     } else {
-        fprintf(stderr, "\e[1;31m"INDENT"Result NOT validated.\e[0m\n");
+        fprintf(stderr, "\e[1;31m" INDENT "Result NOT validated.\e[0m\n");
         MY_ABORT(ret);
     }
     destroy_dist_matrix(&mat);
@@ -86,9 +86,9 @@ int main(int argc, char **argv) {
 
     gflops = 2e-9 * mat.global_nnz * reps / compute_time;
     compute_time_per_run = compute_time / reps;
-    printf(INDENT INDENT"preprocess time = %lf s, compute time = %lf s per run\n", \
+    printf(INDENT INDENT "preprocess time = %lf s, compute time = %lf s per run\n", \
                     pre_time, compute_time_per_run);
-    printf("\e[1;34m"INDENT INDENT"Performance: %lf Gflop/s\e[0m\n", gflops);
+    printf("\e[1;34m" INDENT INDENT "Performance: %lf Gflop/s\e[0m\n", gflops);
 
     return 0;
 }

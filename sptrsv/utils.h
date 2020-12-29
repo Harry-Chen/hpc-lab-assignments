@@ -28,4 +28,14 @@ int check_answer(dist_matrix_t *mat, const char* filename, data_t* y);
 #define NO_MEM cudaErrorMemoryAllocation
 #define IO_ERR 3
 
+#define CUDA_CHECK(condition) \
+  /* Code block avoids redefinition of cudaError_t error */ \
+  do { \
+    cudaError_t error = (condition); \
+    if (error != cudaSuccess) { \
+        fprintf(stderr, "CUDA error %d: %s\n", error, cudaGetErrorString(error)); \
+        assert(error == cudaSuccess); \
+    } \
+  } while (0)
+
 #endif

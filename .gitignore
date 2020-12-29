@@ -8,3 +8,5 @@ build
 perf.data*
 *.swp
 benchmark-*
+*.ptx
+
