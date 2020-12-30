@@ -9,4 +9,6 @@ perf.data*
 *.swp
 benchmark-*
 *.ptx
+*.log
+r*hs
 
