@@ -24,7 +24,7 @@ void destroy_additional_info(void *additional_info) {}
 
 __global__ void sptrsv_capellini_kernel(
     const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values,
-    const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, volatile int *__restrict__ finished, int *curr_row
+    const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, int *__restrict__ finished, int *curr_row
 ) {
     
     // allocate thread id by scheduling order
@@ -64,7 +64,7 @@ __global__ void sptrsv_capellini_kernel(
         // last number (on diagonal)
         if (col == i) {
             x[i] = (b[i] - left_sum) / values[end - 1];
-            // __threadfence(); // ensure x[i] can be read properly by other threads
+            __threadfence(); // ensure x[i] can be read properly by other threads
             finished[i] = 1;
             // printf("%d\n", i);
             ++j;
