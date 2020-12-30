@@ -13,7 +13,9 @@ typedef void (*free_func_t)(void*);
 
 typedef struct {
     int *finished;
-    int *curr_row;
+    int *curr_id;
+    int *row_offset;
+    int warp_count;
 } sptrsv_info_t;
 
 /* 
