@@ -12,7 +12,7 @@
 #endif
 
 #ifndef AVG_NUM_THRESHOLD
-#define AVG_NUM_THRESHOLD 10
+#define AVG_NUM_THRESHOLD 1000000
 #endif
 
 const char* version_name = "optimized version";
@@ -112,7 +112,7 @@ __global__ void sptrsv_capellini_thread_kernel(
 
 __global__ void sptrsv_capellini_warp_kernel(
     const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values, const int *__restrict__ row_offset,
-    const int warp_count, const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, volatile int *finished, int *curr_id
+    const int warp_count, const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, int *__restrict__ finished, int *curr_id
 ) {
     
     // allocate thread id by scheduling order
@@ -142,7 +142,6 @@ __global__ void sptrsv_capellini_warp_kernel(
                 x[i] = (b[i] - left_sum) / values[end - 1];
                 __threadfence();
                 finished[i] = 1;
-                // atomicAdd(&finished[i], 1);
                 ++j;
             }
         }
@@ -155,11 +154,11 @@ __global__ void sptrsv_capellini_warp_kernel(
         const int begin = r_pos[i], end = r_pos[i + 1];
     
         // calculate sum of previous columns
-        for (int j = begin + lane_id; j < end - 1;) {
+        for (int j = begin + lane_id; j < end - 1; j += 32) {
             int col = c_idx[j];
-            while (finished[col] != 1) {}
+            volatile int *finished_col = finished + col;
+            while (*finished_col != 1) {}
             left_sum += values[j] * x[col];
-            j += 32;
         }
     
         // reduce within warp
@@ -171,7 +170,6 @@ __global__ void sptrsv_capellini_warp_kernel(
             x[i] = (b[i] - left_sum) / values[end - 1];
             __threadfence();
             finished[i] = 1;
-            // atomicAdd(&finished[i], 1);
         }
     }
 }
@@ -187,7 +185,7 @@ void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict
     CUDA_CHECK(cudaMemset(finished, 0, m * sizeof(int)));
     CUDA_CHECK(cudaMemset(curr_id, 0, sizeof(int)));
 
-    // sptrsv_capellini_thread_kernel<<<ceiling(m, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, m, nnz, b, x, finished, curr_row);
+    // sptrsv_capellini_thread_kernel<<<ceiling(m, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, m, nnz, b, x, finished, curr_id);
     sptrsv_capellini_warp_kernel<<<ceiling(m * 32, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, info->row_offset, info->warp_count, m, nnz, b, x, finished, curr_id);
     CUDA_CHECK(cudaGetLastError());
 }
