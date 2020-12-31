@@ -11,4 +11,4 @@ benchmark-*
 *.ptx
 *.log
 r*hs
-
+**/result/

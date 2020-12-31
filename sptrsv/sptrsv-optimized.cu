@@ -120,8 +120,8 @@ __global__ void sptrsv_capellini_warp_kernel(
 ) {
     
     // allocate thread id by scheduling order
-    // const int id = atomicAdd(curr_id, 1);
-    const int id = blockDim.x * blockIdx.x + threadIdx.x;
+    const int id = atomicAdd(curr_id, 1);
+    // const int id = blockDim.x * blockIdx.x + threadIdx.x;
     const int w = id >> 5;
     const int lane_id = id & 31;
     if (w >= warp_count) return;
@@ -153,7 +153,8 @@ __global__ void sptrsv_capellini_warp_kernel(
         }
     } else {
         // one warp for current row
-        int i = row_offset[w];
+        // int i = row_offset[w];
+        int i = w;
         if (i >= m) return;
 
         data_t left_sum = 0;
