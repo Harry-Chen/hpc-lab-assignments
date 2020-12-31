@@ -15,6 +15,10 @@ typedef struct {
     char *finished;
     int *curr_id;
     int *row_offset;
+    index_t *r_pos_aligned;
+    index_t *c_idx_aligned;
+    data_t *values_aligned;
+    data_t *values_diag_inv;
     int warp_count;
 } sptrsv_info_t;
 
