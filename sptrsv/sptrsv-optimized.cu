@@ -15,6 +15,10 @@
 #define AVG_NUM_THRESHOLD 1000000
 #endif
 
+#ifndef FORCE_USE_WARP
+#define FORCE_USE_WARP true
+#endif
+
 const char* version_name = "optimized version";
 
 void preprocess(dist_matrix_t *mat) {
@@ -34,7 +38,7 @@ void preprocess(dist_matrix_t *mat) {
         int elements = mat->r_pos[row_end] - mat->r_pos[i];
         auto avg_per_row = (double) elements / rows;
         bool use_warp = avg_per_row >= AVG_NUM_THRESHOLD;
-        if (use_warp) {
+        if (FORCE_USE_WARP || use_warp) {
             // one warp for each row
             for (int j = 0; j < rows; ++j) {
                 row_offset[k++] = ++curr_row;
@@ -48,7 +52,7 @@ void preprocess(dist_matrix_t *mat) {
 
     auto info = new sptrsv_info_t;
     info->warp_count = k - 1;
-    CUDA_CHECK(cudaMalloc(&info->finished, m * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&info->finished, m * sizeof(char)));
     CUDA_CHECK(cudaMalloc(&info->row_offset, (m + 1) * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&info->curr_id, sizeof(int)));
     CUDA_CHECK(cudaMemcpy(info->row_offset, row_offset, k * sizeof(int), cudaMemcpyHostToDevice));
@@ -62,7 +66,7 @@ void destroy_additional_info(void *additional_info) {}
 
 __global__ void sptrsv_capellini_thread_kernel(
     const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values,
-    const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, int *finished, int *curr_id
+    const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, volatile char *__restrict__ finished, int *curr_id
 ) {
     
     // allocate thread id by scheduling order
@@ -94,7 +98,7 @@ __global__ void sptrsv_capellini_thread_kernel(
     // for (int k = 0; k < 16; ++k) {
         int col = c_idx[j];
         // iterate over all finished numbers
-        volatile int *finished_col = finished + col;
+        volatile char *finished_col = finished + col;
         while (finished[col] != 1) {}
             left_sum += values[j] * x[col];
             col = c_idx[++j];
@@ -112,18 +116,19 @@ __global__ void sptrsv_capellini_thread_kernel(
 
 __global__ void sptrsv_capellini_warp_kernel(
     const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values, const int *__restrict__ row_offset,
-    const int warp_count, const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, int *__restrict__ finished, int *curr_id
+    const int warp_count, const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, volatile char *__restrict__ finished, int *curr_id
 ) {
     
     // allocate thread id by scheduling order
-    const int id = atomicAdd(curr_id, 1);
+    // const int id = atomicAdd(curr_id, 1);
+    const int id = blockDim.x * blockIdx.x + threadIdx.x;
     const int w = id >> 5;
     const int lane_id = id & 31;
     if (w >= warp_count) return;
 
     bool use_thread = row_offset[w + 1] > row_offset[w] + 1;
 
-    if (use_thread) {
+    if (!FORCE_USE_WARP && use_thread) {
         // one thread for current row
         int i = row_offset[w] + lane_id;
         if (i >= m) return;
@@ -134,7 +139,8 @@ __global__ void sptrsv_capellini_warp_kernel(
         int j = begin;
         while (j < end) {
             int col = c_idx[j];
-            while (finished[col] == 1) {
+            while (finished[col]) {
+                __threadfence();
                 left_sum += values[j] * x[col];
                 col = c_idx[++j];
             }
@@ -156,8 +162,10 @@ __global__ void sptrsv_capellini_warp_kernel(
         // calculate sum of previous columns
         for (int j = begin + lane_id; j < end - 1; j += 32) {
             int col = c_idx[j];
-            volatile int *finished_col = finished + col;
-            while (*finished_col != 1) {}
+            while (!finished[col]) {
+                __threadfence();
+            }
+            // volatile data_t *x_col = x + col;
             left_sum += values[j] * x[col];
         }
     
@@ -182,7 +190,7 @@ void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict
     auto info = (sptrsv_info_t *) mat->additional_info;
     auto finished = info->finished;
     auto curr_id = info->curr_id;
-    CUDA_CHECK(cudaMemset(finished, 0, m * sizeof(int)));
+    CUDA_CHECK(cudaMemset(finished, 0, m * sizeof(char)));
     CUDA_CHECK(cudaMemset(curr_id, 0, sizeof(int)));
 
     // sptrsv_capellini_thread_kernel<<<ceiling(m, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, m, nnz, b, x, finished, curr_id);

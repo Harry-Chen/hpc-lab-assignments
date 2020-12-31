@@ -12,7 +12,7 @@ typedef double data_t;
 typedef void (*free_func_t)(void*);
 
 typedef struct {
-    int *finished;
+    char *finished;
     int *curr_id;
     int *row_offset;
     int warp_count;
