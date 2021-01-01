@@ -1,6 +1,7 @@
 include ../gpu.makefrag
 
 CUDAOPT := $(CUDAOPT) -m64 -Xptxas -warn-spills -arch compute_35 -code compute_35 -code sm_35
+LDLIBS := $(LDLIBS)
 
 targets =  benchmark-cusparse benchmark-optimized
 commonobj = utils.o benchmark.o

@@ -4,6 +4,10 @@
 #include <cuda.h>
 #include <math.h>
 
+#include <algorithm>
+#include <utility>
+#include <functional>
+
 #include "common.h"
 #include "utils.h"
 
@@ -57,17 +61,29 @@ void preprocess(dist_matrix_t *mat) {
     auto info = new sptrsv_info_t;
     info->warp_count = k - 1;
 
-    auto r_pos = new index_t[m + 1];
-    auto c_idx = new index_t[nnz - m];
-    auto values = new data_t[nnz - m];
+    CUDA_CHECK(cudaStreamCreate(&info->copy_stream));
+    CUDA_CHECK(cudaMalloc(&info->c_idx_sorted, nnz * sizeof(index_t)));
+    CUDA_CHECK(cudaMalloc(&info->values_sorted, nnz * sizeof(data_t)));
+    CUDA_CHECK(cudaMalloc(&info->values_diag_inv, m * sizeof(data_t)));
+    CUDA_CHECK(cudaMalloc(&info->row_orders, m * sizeof(index_t)));
+    CUDA_CHECK(cudaMalloc(&info->row_offset, (m + 1) * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&info->finished, m * sizeof(char)));
+    CUDA_CHECK(cudaMalloc(&info->curr_id, sizeof(int)));
+
+    auto c_idx_sorted = new index_t[nnz];
+    auto values_sorted = new data_t[nnz];
     auto values_diag_inv = new data_t[m];
+
+    memcpy(c_idx_sorted, mat->c_idx, sizeof(index_t) * nnz);
+    memcpy(values_sorted, mat->values, sizeof(data_t) * nnz);
 
     auto levels = new int[m];
     levels[0] = 0;
     int max_level = 0;
 
-    // int pos = 0;
-    // r_pos[0] = 0;
+    using sort_data_t = std::pair<int, std::pair<index_t, data_t>>;
+    auto data_sort = new sort_data_t[m];
+
     for (int i = 0; i < m; ++i) {
         int begin = mat->r_pos[i], end = mat->r_pos[i + 1];
         // level for current row
@@ -75,21 +91,26 @@ void preprocess(dist_matrix_t *mat) {
         for (int j = begin; j < end - 1; j++) {
             int col = mat->c_idx[j];
             l = max(levels[col], l);
+            data_sort[j - begin] = std::make_pair(levels[col], std::make_pair(col, mat->values[j]));
+        }
+        if (end > begin + 1) {
+            std::sort(data_sort, data_sort + end - begin - 1, [&](const sort_data_t &i, const sort_data_t &j) { return i.first < j.first; });
+            for (int j = begin; j < end - 1; j++) {
+                const auto &data = data_sort[j - begin].second;
+                c_idx_sorted[j] = data.first;
+                values_sorted[j] = data.second;
+            }
         }
         levels[i] = l + 1;
         max_level = max(max_level, l + 1);
         int count = end - begin - 1;
-        // r_pos[i + 1] = pos + count; // set r_pos
         values_diag_inv[i] = 1 / mat->values[end - 1]; // copy diag
-        // memcpy(c_idx + pos, mat->c_idx + begin, count * sizeof(index_t)); // copy c_idx
-        // memcpy(values + pos, mat->values + begin, count * sizeof(data_t)); // copy values
-        // pos += count;
     }
 
-    // for (int i = 0; i < 100; ++i) {
-    //     printf("%d ", levels[i]);
-    // }
-    // puts("");
+    CUDA_CHECK(cudaMemcpyAsync(info->c_idx_sorted, c_idx_sorted, nnz * sizeof(index_t), cudaMemcpyHostToDevice, info->copy_stream));
+    CUDA_CHECK(cudaMemcpyAsync(info->values_sorted, values_sorted, nnz * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
+    CUDA_CHECK(cudaMemcpyAsync(info->values_diag_inv, values_diag_inv, m * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
+
     // printf("Max Level: %d\n", max_level);
 
     // count number of each levels (counting sort)
@@ -112,45 +133,26 @@ void preprocess(dist_matrix_t *mat) {
     for (int i = 0; i < m; ++i) {
         int level = levels[i];
         int new_order = level_offsets[level] + (level_counts[level]++);
-        // if (i < 100) printf("%d ", new_order);
         row_orders[new_order] = i;
     }
-    // puts("");
 
-    // for (int i = 0; i < 100; ++i) {
-    //     printf("%d ", row_orders[i]);
-    // }
-    // puts("");
+    CUDA_CHECK(cudaMemcpyAsync(info->row_orders, row_orders, m * sizeof(index_t), cudaMemcpyHostToDevice, info->copy_stream));
+    CUDA_CHECK(cudaMemcpyAsync(info->row_offset, row_offset, k * sizeof(int), cudaMemcpyHostToDevice, info->copy_stream));
 
-    // CUDA_CHECK(cudaMalloc(&info->r_pos_aligned, (m + 1) * sizeof(index_t)));
-    // CUDA_CHECK(cudaMalloc(&info->c_idx_aligned, (nnz - m) * sizeof(index_t)));
-    // CUDA_CHECK(cudaMalloc(&info->values_aligned, (nnz - m) * sizeof(data_t)));
-    CUDA_CHECK(cudaMalloc(&info->values_diag_inv, m * sizeof(data_t)));
-    CUDA_CHECK(cudaMalloc(&info->finished, m * sizeof(char)));
-    CUDA_CHECK(cudaMalloc(&info->row_offset, (m + 1) * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&info->curr_id, sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&info->row_orders, m * sizeof(index_t)));
-
-
-    CUDA_CHECK(cudaMemcpy(info->row_offset, row_offset, k * sizeof(int), cudaMemcpyHostToDevice));
-    // CUDA_CHECK(cudaMemcpy(info->r_pos_aligned, r_pos, (m + 1) * sizeof(index_t), cudaMemcpyHostToDevice));
-    // CUDA_CHECK(cudaMemcpy(info->c_idx_aligned, c_idx, (nnz - m) * sizeof(index_t), cudaMemcpyHostToDevice));
-    // CUDA_CHECK(cudaMemcpy(info->values_aligned, values, (nnz - m) * sizeof(data_t), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(info->values_diag_inv, values_diag_inv, m * sizeof(data_t), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(info->row_orders, row_orders, m * sizeof(index_t), cudaMemcpyHostToDevice));
     mat->additional_info = info;
 
-    delete[] row_offset;
-    delete[] r_pos;
-    delete[] c_idx;
-    delete[] values;
-    delete[] values_diag_inv;
-    delete[] row_orders;
-    delete[] level_offsets;
-    delete[] level_counts;
+    // delete[] row_offset;
+    // delete[] c_idx_sorted;
+    // delete[] values_sorted;
+    // delete[] values_diag_inv;
+    // delete[] row_orders;
+    // delete[] level_offsets;
+    // delete[] level_counts;
 }
 
-void destroy_additional_info(void *additional_info) {}
+void destroy_additional_info(void *additional_info) {
+    cudaStreamDestroy(((sptrsv_info_t *)additional_info)->copy_stream);
+}
 
 
 __global__ void sptrsv_capellini_adaptive_kernel(
@@ -263,6 +265,6 @@ void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict
     CUDA_CHECK(cudaMemset(finished, 0, m * sizeof(char)));
     CUDA_CHECK(cudaMemset(curr_id, 0, sizeof(int)));
 
-    sptrsv_capellini_adaptive_kernel<<<ceiling(m * 32, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, info->values_diag_inv, info->row_orders, info->row_offset, info->warp_count, m, b, x, finished, curr_id);
+    sptrsv_capellini_adaptive_kernel<<<ceiling(m * 32, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, info->c_idx_sorted, info->values_sorted, info->values_diag_inv, info->row_orders, info->row_offset, info->warp_count, m, b, x, finished, curr_id);
     CUDA_CHECK(cudaGetLastError());
 }

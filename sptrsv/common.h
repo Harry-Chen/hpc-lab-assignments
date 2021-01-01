@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <cuda_runtime.h>
 
 #define UNREACHABLE (-1)
 typedef int32_t index_t;
@@ -16,11 +17,11 @@ typedef struct {
     int *curr_id;
     int *row_offset;
     index_t *row_orders;
-    index_t *r_pos_aligned;
-    index_t *c_idx_aligned;
-    data_t *values_aligned;
+    index_t *c_idx_sorted;
+    data_t *values_sorted;
     data_t *values_diag_inv;
     int warp_count;
+    cudaStream_t copy_stream;
 } sptrsv_info_t;
 
 /* 
