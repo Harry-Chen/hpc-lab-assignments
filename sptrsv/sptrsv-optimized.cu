@@ -27,7 +27,16 @@
 #define FORCE_USE_WARP true
 #endif
 
-const char* version_name = "optimized version";
+#ifndef REORDER_ROW
+#define REORDER_ROW true
+#endif
+
+#ifndef SORT_COLUMN
+#define SORT_COLUMN true
+#endif
+
+
+const char *version_name = "optimized version";
 
 void preprocess(dist_matrix_t *mat) {
 
@@ -62,27 +71,40 @@ void preprocess(dist_matrix_t *mat) {
     info->warp_count = k - 1;
 
     CUDA_CHECK(cudaStreamCreate(&info->copy_stream));
-    CUDA_CHECK(cudaMalloc(&info->c_idx_sorted, nnz * sizeof(index_t)));
-    CUDA_CHECK(cudaMalloc(&info->values_sorted, nnz * sizeof(data_t)));
+    if (SORT_COLUMN) {
+        CUDA_CHECK(cudaMalloc(&info->c_idx_sorted, nnz * sizeof(index_t)));
+        CUDA_CHECK(cudaMalloc(&info->values_sorted, nnz * sizeof(data_t)));
+    }
     CUDA_CHECK(cudaMalloc(&info->values_diag_inv, m * sizeof(data_t)));
-    CUDA_CHECK(cudaMalloc(&info->row_orders, m * sizeof(index_t)));
-    CUDA_CHECK(cudaMalloc(&info->row_offset, (m + 1) * sizeof(int)));
+    if (REORDER_ROW) {
+        CUDA_CHECK(cudaMalloc(&info->row_orders, m * sizeof(index_t)));
+    }
     CUDA_CHECK(cudaMalloc(&info->finished, m * sizeof(char)));
     CUDA_CHECK(cudaMalloc(&info->curr_id, sizeof(int)));
+    if (!FORCE_USE_THREAD && !FORCE_USE_WARP) {
+        CUDA_CHECK(cudaMalloc(&info->row_offset, (m + 1) * sizeof(int)));
+        CUDA_CHECK(cudaMemcpyAsync(info->row_offset, row_offset, k * sizeof(int), cudaMemcpyHostToDevice, info->copy_stream));
+    }
 
-    auto c_idx_sorted = new index_t[nnz];
-    auto values_sorted = new data_t[nnz];
+
     auto values_diag_inv = new data_t[m];
-
-    memcpy(c_idx_sorted, mat->c_idx, sizeof(index_t) * nnz);
-    memcpy(values_sorted, mat->values, sizeof(data_t) * nnz);
 
     auto levels = new int[m];
     levels[0] = 0;
     int max_level = 0;
 
     using sort_data_t = std::pair<int, std::pair<index_t, data_t>>;
-    auto data_sort = new sort_data_t[m];
+    index_t *c_idx_sorted;
+    data_t *values_sorted;
+    sort_data_t *data_sort;
+
+    if (SORT_COLUMN) {
+        c_idx_sorted = new index_t[nnz];
+        values_sorted = new data_t[nnz];
+        memcpy(c_idx_sorted, mat->c_idx, sizeof(index_t) * nnz);
+        memcpy(values_sorted, mat->values, sizeof(data_t) * nnz);
+        data_sort = new sort_data_t[m];
+    }
 
     for (int i = 0; i < m; ++i) {
         int begin = mat->r_pos[i], end = mat->r_pos[i + 1];
@@ -91,9 +113,9 @@ void preprocess(dist_matrix_t *mat) {
         for (int j = begin; j < end - 1; j++) {
             int col = mat->c_idx[j];
             l = max(levels[col], l);
-            data_sort[j - begin] = std::make_pair(levels[col], std::make_pair(col, mat->values[j]));
+            if (SORT_COLUMN) data_sort[j - begin] = std::make_pair(levels[col], std::make_pair(col, mat->values[j]));
         }
-        if (end > begin + 1) {
+        if (SORT_COLUMN && end > begin + 1) {
             std::sort(data_sort, data_sort + end - begin - 1, [&](const sort_data_t &i, const sort_data_t &j) { return i.first < j.first; });
             for (int j = begin; j < end - 1; j++) {
                 const auto &data = data_sort[j - begin].second;
@@ -107,47 +129,36 @@ void preprocess(dist_matrix_t *mat) {
         values_diag_inv[i] = 1 / mat->values[end - 1]; // copy diag
     }
 
-    CUDA_CHECK(cudaMemcpyAsync(info->c_idx_sorted, c_idx_sorted, nnz * sizeof(index_t), cudaMemcpyHostToDevice, info->copy_stream));
-    CUDA_CHECK(cudaMemcpyAsync(info->values_sorted, values_sorted, nnz * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
+    // copy sorted values to
     CUDA_CHECK(cudaMemcpyAsync(info->values_diag_inv, values_diag_inv, m * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
-
-    // printf("Max Level: %d\n", max_level);
-
-    // count number of each levels (counting sort)
-    auto level_offsets = new int[max_level + 2](), level_counts = new int[max_level + 1]();
-    auto row_orders = new index_t[m];
-
-    for (int i = 0; i < m; ++i) {
-        level_offsets[levels[i] + 1]++;
+    if (SORT_COLUMN) {
+        CUDA_CHECK(cudaMemcpyAsync(info->c_idx_sorted, c_idx_sorted, nnz * sizeof(index_t), cudaMemcpyHostToDevice, info->copy_stream));
+        CUDA_CHECK(cudaMemcpyAsync(info->values_sorted, values_sorted, nnz * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
     }
 
-    for (int i = 0; i < max_level + 1; ++i) {
-        level_offsets[i + 1] += level_offsets[i];
+    // count number of each levels then reorder according to levels
+    if (REORDER_ROW) {
+        auto level_offsets = new int[max_level + 2](), level_counts = new int[max_level + 1]();
+        auto row_orders = new index_t[m];
+
+        // counting sort
+        for (int i = 0; i < m; ++i) {
+            level_offsets[levels[i] + 1]++;
+        }
+        for (int i = 0; i < max_level + 1; ++i) {
+            level_offsets[i + 1] += level_offsets[i];
+        }
+        for (int i = 0; i < m; ++i) {
+            int level = levels[i];
+            int new_order = level_offsets[level] + (level_counts[level]++);
+            row_orders[new_order] = i;
+        }
+
+        // copy new row orders to GPU
+        CUDA_CHECK(cudaMemcpyAsync(info->row_orders, row_orders, m * sizeof(index_t), cudaMemcpyHostToDevice, info->copy_stream));
     }
-
-    // for (int i = 0; i < min(max_level + 1, 100); ++i) {
-    //     printf("%d ", level_offsets[i]);
-    // }
-    // puts("");
-
-    for (int i = 0; i < m; ++i) {
-        int level = levels[i];
-        int new_order = level_offsets[level] + (level_counts[level]++);
-        row_orders[new_order] = i;
-    }
-
-    CUDA_CHECK(cudaMemcpyAsync(info->row_orders, row_orders, m * sizeof(index_t), cudaMemcpyHostToDevice, info->copy_stream));
-    CUDA_CHECK(cudaMemcpyAsync(info->row_offset, row_offset, k * sizeof(int), cudaMemcpyHostToDevice, info->copy_stream));
 
     mat->additional_info = info;
-
-    // delete[] row_offset;
-    // delete[] c_idx_sorted;
-    // delete[] values_sorted;
-    // delete[] values_diag_inv;
-    // delete[] row_orders;
-    // delete[] level_offsets;
-    // delete[] level_counts;
 }
 
 void destroy_additional_info(void *additional_info) {
@@ -155,13 +166,13 @@ void destroy_additional_info(void *additional_info) {
 }
 
 
+template <bool FORCE_THREAD=FORCE_USE_THREAD, bool FORCE_WARP=FORCE_USE_WARP>
 __global__ void sptrsv_capellini_adaptive_kernel(
     const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values, const data_t *__restrict__ values_diag_inv, const index_t *__restrict__ row_orders,
     const int *__restrict__ row_offset, const int warp_count, const int m, const data_t *__restrict__ b, data_t *__restrict__ x, volatile char *__restrict__ finished, int *curr_id
 ) {
     
     // allocate thread id by scheduling order
-    // const int id = blockDim.x * blockIdx.x + threadIdx.x;    
     const int lane_id = threadIdx.x & 31;
     int id = 0;
     if (lane_id == 0) {
@@ -170,38 +181,38 @@ __global__ void sptrsv_capellini_adaptive_kernel(
     id = __shfl_sync(0xFFFFFFFF, id, 0) + lane_id;
     const int w = id >> 5;
     
-#if !FORCE_USE_THREAD
-    if (w >= warp_count) return;
-#endif
+    if (!FORCE_THREAD && w >= warp_count) {
+        return;
+    }
 
-    bool use_thread = FORCE_USE_THREAD || (!FORCE_USE_WARP && row_offset[w + 1] > row_offset[w] + 1);
+    // whether use thread (thread-only or hybrid mode)
+    bool use_thread = FORCE_THREAD || (!FORCE_WARP && row_offset[w + 1] > row_offset[w] + 1);
 
-    if (FORCE_USE_THREAD || (!FORCE_USE_WARP && use_thread)) {
-        // one thread for current row
-#if FORCE_USE_THREAD
-        int i = id;
-#else
-        int i = row_offset[w] + lane_id;
-#endif
+    if (FORCE_THREAD || (!FORCE_WARP && use_thread)) {
+        // assign one thread for current row
+        assert(!FORCE_WARP);
 
-#if FORCE_USE_WARP
-        assert(false);
-#endif
+        // row id
+        int i;
+        if (FORCE_THREAD) {
+            i = id;
+        } else {
+            i = row_offset[w] + lane_id;
+        }
+
         if (i >= m) return;
-        i = row_orders[i];
+        if (REORDER_ROW) i = row_orders[i];
 
         const int begin = r_pos[i], end = r_pos[i + 1];
         data_t bi = b[i], diag_inv = values_diag_inv[i];
         
         for (int j = begin; j < end;) {
             int col = c_idx[j];
-            // volatile char *finished_col = finished + col;
             if (col == i) {
                 x[i] = bi * diag_inv;
                 __threadfence();
                 finished[col] = 1;
                 break;
-                // j++;
             }
             while (finished[col]) {
                 // __threadfence();
@@ -210,18 +221,19 @@ __global__ void sptrsv_capellini_adaptive_kernel(
             }
         }
     } else {
-        // one warp for current row
-#if FORCE_USR_WARP
-        int i = w;
-#else
-        int i = row_offset[w];
-#endif
+        // assign one warp for current row
+        assert(!FORCE_THREAD);
 
-#if FORCE_USE_THREAD
-        assert(false);
-#endif
+        // row id
+        int i;
+        if (FORCE_WARP) {
+            i = w;
+        } else {
+            i = row_offset[w];
+        }
+
         if (i >= m) return;
-        i = row_orders[i];
+        if (REORDER_ROW) i = row_orders[i];
 
         data_t left_sum = 0;
         const int begin = r_pos[i], end = r_pos[i + 1];
@@ -235,7 +247,6 @@ __global__ void sptrsv_capellini_adaptive_kernel(
             while (finished[col] == 0) {
                 __threadfence();
             }
-            // volatile data_t *x_col = x + col;
             left_sum += value * x[col];
         }
 
