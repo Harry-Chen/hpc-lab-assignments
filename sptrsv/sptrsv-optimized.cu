@@ -62,35 +62,82 @@ void preprocess(dist_matrix_t *mat) {
     auto values = new data_t[nnz - m];
     auto values_diag_inv = new data_t[m];
 
-    int pos = 0;
-    r_pos[0] = 0;
+    auto levels = new int[m];
+    levels[0] = 0;
+    int max_level = 0;
+
+    // int pos = 0;
+    // r_pos[0] = 0;
     for (int i = 0; i < m; ++i) {
         int begin = mat->r_pos[i], end = mat->r_pos[i + 1];
-        int count = end - begin - 1; // diag
-        r_pos[i + 1] = pos + count; // set r_pos
+        // level for current row
+        int l = -1;
+        for (int j = begin; j < end - 1; j++) {
+            int col = mat->c_idx[j];
+            l = max(levels[col], l);
+        }
+        levels[i] = l + 1;
+        max_level = max(max_level, l + 1);
+        int count = end - begin - 1;
+        // r_pos[i + 1] = pos + count; // set r_pos
         values_diag_inv[i] = 1 / mat->values[end - 1]; // copy diag
-        // for (int j = begin; j < begin + count; ++j) {
-        //     assert(mat->c_idx[j] < mat->c_idx[j + 1]);
-        // }
-        memcpy(c_idx + pos, mat->c_idx + begin, count * sizeof(index_t)); // copy c_idx
-        memcpy(values + pos, mat->values + begin, count * sizeof(data_t)); // copy values
-        pos += count;
+        // memcpy(c_idx + pos, mat->c_idx + begin, count * sizeof(index_t)); // copy c_idx
+        // memcpy(values + pos, mat->values + begin, count * sizeof(data_t)); // copy values
+        // pos += count;
     }
 
-    CUDA_CHECK(cudaMalloc(&info->r_pos_aligned, (m + 1) * sizeof(index_t)));
-    CUDA_CHECK(cudaMalloc(&info->c_idx_aligned, (nnz - m) * sizeof(index_t)));
-    CUDA_CHECK(cudaMalloc(&info->values_aligned, (nnz - m) * sizeof(data_t)));
+    // for (int i = 0; i < 100; ++i) {
+    //     printf("%d ", levels[i]);
+    // }
+    // puts("");
+    // printf("Max Level: %d\n", max_level);
+
+    // count number of each levels (counting sort)
+    auto level_offsets = new int[max_level + 2](), level_counts = new int[max_level + 1]();
+    auto row_orders = new index_t[m];
+
+    for (int i = 0; i < m; ++i) {
+        level_offsets[levels[i] + 1]++;
+    }
+
+    for (int i = 0; i < max_level + 1; ++i) {
+        level_offsets[i + 1] += level_offsets[i];
+    }
+
+    // for (int i = 0; i < min(max_level + 1, 100); ++i) {
+    //     printf("%d ", level_offsets[i]);
+    // }
+    // puts("");
+
+    for (int i = 0; i < m; ++i) {
+        int level = levels[i];
+        int new_order = level_offsets[level] + (level_counts[level]++);
+        // if (i < 100) printf("%d ", new_order);
+        row_orders[new_order] = i;
+    }
+    // puts("");
+
+    // for (int i = 0; i < 100; ++i) {
+    //     printf("%d ", row_orders[i]);
+    // }
+    // puts("");
+
+    // CUDA_CHECK(cudaMalloc(&info->r_pos_aligned, (m + 1) * sizeof(index_t)));
+    // CUDA_CHECK(cudaMalloc(&info->c_idx_aligned, (nnz - m) * sizeof(index_t)));
+    // CUDA_CHECK(cudaMalloc(&info->values_aligned, (nnz - m) * sizeof(data_t)));
     CUDA_CHECK(cudaMalloc(&info->values_diag_inv, m * sizeof(data_t)));
     CUDA_CHECK(cudaMalloc(&info->finished, m * sizeof(char)));
     CUDA_CHECK(cudaMalloc(&info->row_offset, (m + 1) * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&info->curr_id, sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&info->row_orders, m * sizeof(index_t)));
 
 
     CUDA_CHECK(cudaMemcpy(info->row_offset, row_offset, k * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(info->r_pos_aligned, r_pos, (m + 1) * sizeof(index_t), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(info->c_idx_aligned, c_idx, (nnz - m) * sizeof(index_t), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(info->values_aligned, values, (nnz - m) * sizeof(data_t), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(info->r_pos_aligned, r_pos, (m + 1) * sizeof(index_t), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(info->c_idx_aligned, c_idx, (nnz - m) * sizeof(index_t), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(info->values_aligned, values, (nnz - m) * sizeof(data_t), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(info->values_diag_inv, values_diag_inv, m * sizeof(data_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(info->row_orders, row_orders, m * sizeof(index_t), cudaMemcpyHostToDevice));
     mat->additional_info = info;
 
     delete[] row_offset;
@@ -98,76 +145,27 @@ void preprocess(dist_matrix_t *mat) {
     delete[] c_idx;
     delete[] values;
     delete[] values_diag_inv;
+    delete[] row_orders;
+    delete[] level_offsets;
+    delete[] level_counts;
 }
 
 void destroy_additional_info(void *additional_info) {}
 
 
-__global__ void sptrsv_capellini_thread_kernel(
-    const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values,
-    const int m, const int nnz, const data_t *__restrict__ b, data_t *__restrict__ x, volatile char *__restrict__ finished, int *curr_id
-) {
-    
-    // allocate thread id by scheduling order
-    const int i = atomicAdd(curr_id, 1);
-    if (i >= m) return;
-
-
-    // begin index of current warp (must be contiguous 32 numbers in a row)
-    const int warp_begin = (i >> 5) << 5;
-
-    data_t left_sum = 0;
-
-    const int begin = r_pos[i], end = r_pos[i + 1];
-
-    int j = begin;
-
-    // for (; j < end; ++j) {
-    //     int col = c_idx[j];
-    //     if (col < warp_begin) {
-    //         while (finished[col] != 1) __threadfence_block();
-    //         left_sum += values[j] * x[col];
-    //     } else {
-    //         break;
-    //     }
-    // }
-
-    // go through all numbers on current row
-    while (j < end) {
-        int col = c_idx[j];
-        // iterate over all finished numbers
-        volatile char *finished_col = finished + col;
-        while (finished[col]) {
-            // __threadfence();
-            left_sum += values[j] * x[col];
-            col = c_idx[++j];
-        }
-        // last number (on diagonal)
-        if (col == i) {
-            x[i] = (b[i] - left_sum) / values[end - 1];
-            __threadfence(); // ensure x[i] can be read properly by other threads
-            finished[i] = 1;
-            ++j;
-        }
-    }
-}
-
-
-__global__ void sptrsv_capellini_warp_kernel(
-    const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values, const data_t *__restrict__ values_diag_inv,
+__global__ void sptrsv_capellini_adaptive_kernel(
+    const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values, const data_t *__restrict__ values_diag_inv, const index_t *__restrict__ row_orders,
     const int *__restrict__ row_offset, const int warp_count, const int m, const data_t *__restrict__ b, data_t *__restrict__ x, volatile char *__restrict__ finished, int *curr_id
 ) {
     
     // allocate thread id by scheduling order
-    // const int id = atomicAdd(curr_id, 1);
-    // const int id = blockDim.x * blockIdx.x + threadIdx.x;
-    
+    // const int id = blockDim.x * blockIdx.x + threadIdx.x;    
     const int lane_id = threadIdx.x & 31;
     int id = 0;
     if (lane_id == 0) {
         id = atomicAdd(curr_id, 1) << 5;
     }
-    id = __shfl(id, 0) + lane_id;
+    id = __shfl_sync(0xFFFFFFFF, id, 0) + lane_id;
     const int w = id >> 5;
     
 #if !FORCE_USE_THREAD
@@ -188,6 +186,7 @@ __global__ void sptrsv_capellini_warp_kernel(
         assert(false);
 #endif
         if (i >= m) return;
+        i = row_orders[i];
 
         const int begin = r_pos[i], end = r_pos[i + 1];
         data_t bi = b[i], diag_inv = values_diag_inv[i];
@@ -220,6 +219,7 @@ __global__ void sptrsv_capellini_warp_kernel(
         assert(false);
 #endif
         if (i >= m) return;
+        i = row_orders[i];
 
         data_t left_sum = 0;
         const int begin = r_pos[i], end = r_pos[i + 1];
@@ -263,7 +263,6 @@ void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict
     CUDA_CHECK(cudaMemset(finished, 0, m * sizeof(char)));
     CUDA_CHECK(cudaMemset(curr_id, 0, sizeof(int)));
 
-    // sptrsv_capellini_thread_kernel<<<ceiling(m, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, m, nnz, b, x, finished, curr_id);
-    sptrsv_capellini_warp_kernel<<<ceiling(m * 32, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, info->values_diag_inv, info->row_offset, info->warp_count, m, b, x, finished, curr_id);
+    sptrsv_capellini_adaptive_kernel<<<ceiling(m * 32, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, mat->gpu_c_idx, mat->gpu_values, info->values_diag_inv, info->row_orders, info->row_offset, info->warp_count, m, b, x, finished, curr_id);
     CUDA_CHECK(cudaGetLastError());
 }

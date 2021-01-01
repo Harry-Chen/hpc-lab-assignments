@@ -15,6 +15,7 @@ typedef struct {
     char *finished;
     int *curr_id;
     int *row_offset;
+    index_t *row_orders;
     index_t *r_pos_aligned;
     index_t *c_idx_aligned;
     data_t *values_aligned;
