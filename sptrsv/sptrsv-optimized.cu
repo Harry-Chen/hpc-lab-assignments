@@ -12,7 +12,7 @@
 #endif
 
 #ifndef AVG_NUM_THRESHOLD
-#define AVG_NUM_THRESHOLD 32
+#define AVG_NUM_THRESHOLD 50
 #endif
 
 #ifndef FORCE_USE_THREAD
