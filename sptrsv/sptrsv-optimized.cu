@@ -27,6 +27,10 @@
 #define FORCE_USE_WARP true
 #endif
 
+#if FORCE_USE_THREAD && FORCE_USE_WARP
+#error "cannot specify thread-only & warp-only simultaneously"
+#endif
+
 #ifndef REORDER_ROW
 #define REORDER_ROW true
 #endif
@@ -71,10 +75,8 @@ void preprocess(dist_matrix_t *mat) {
     info->warp_count = k - 1;
 
     CUDA_CHECK(cudaStreamCreate(&info->copy_stream));
-    if (SORT_COLUMN) {
-        CUDA_CHECK(cudaMalloc(&info->c_idx_sorted, nnz * sizeof(index_t)));
-        CUDA_CHECK(cudaMalloc(&info->values_sorted, nnz * sizeof(data_t)));
-    }
+    CUDA_CHECK(cudaMalloc(&info->c_idx_sorted, nnz * sizeof(index_t)));
+    CUDA_CHECK(cudaMalloc(&info->values_sorted, nnz * sizeof(data_t)));
     CUDA_CHECK(cudaMalloc(&info->values_diag_inv, m * sizeof(data_t)));
     if (REORDER_ROW) {
         CUDA_CHECK(cudaMalloc(&info->row_orders, m * sizeof(index_t)));
@@ -94,15 +96,14 @@ void preprocess(dist_matrix_t *mat) {
     int max_level = 0;
 
     using sort_data_t = std::pair<int, std::pair<index_t, data_t>>;
-    index_t *c_idx_sorted;
-    data_t *values_sorted;
+    index_t *c_idx_sorted = new index_t[nnz];
+    data_t *values_sorted = new data_t[nnz];
     sort_data_t *data_sort;
 
+    memcpy(c_idx_sorted, mat->c_idx, sizeof(index_t) * nnz);
+    memcpy(values_sorted, mat->values, sizeof(data_t) * nnz);
+    
     if (SORT_COLUMN) {
-        c_idx_sorted = new index_t[nnz];
-        values_sorted = new data_t[nnz];
-        memcpy(c_idx_sorted, mat->c_idx, sizeof(index_t) * nnz);
-        memcpy(values_sorted, mat->values, sizeof(data_t) * nnz);
         data_sort = new sort_data_t[m];
     }
 
@@ -131,10 +132,8 @@ void preprocess(dist_matrix_t *mat) {
 
     // copy sorted values to
     CUDA_CHECK(cudaMemcpyAsync(info->values_diag_inv, values_diag_inv, m * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
-    if (SORT_COLUMN) {
-        CUDA_CHECK(cudaMemcpyAsync(info->c_idx_sorted, c_idx_sorted, nnz * sizeof(index_t), cudaMemcpyHostToDevice, info->copy_stream));
-        CUDA_CHECK(cudaMemcpyAsync(info->values_sorted, values_sorted, nnz * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
-    }
+    CUDA_CHECK(cudaMemcpyAsync(info->c_idx_sorted, c_idx_sorted, nnz * sizeof(index_t), cudaMemcpyHostToDevice, info->copy_stream));
+    CUDA_CHECK(cudaMemcpyAsync(info->values_sorted, values_sorted, nnz * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
 
     // count number of each levels then reorder according to levels
     if (REORDER_ROW) {
@@ -166,7 +165,7 @@ void destroy_additional_info(void *additional_info) {
 }
 
 
-template <bool FORCE_THREAD=FORCE_USE_THREAD, bool FORCE_WARP=FORCE_USE_WARP>
+template <bool FORCE_THREAD = FORCE_USE_THREAD, bool FORCE_WARP = FORCE_USE_WARP, bool USE_REORDER_ROW = REORDER_ROW>
 __global__ void sptrsv_capellini_adaptive_kernel(
     const index_t *__restrict__ r_pos, const index_t *__restrict__ c_idx, const data_t *__restrict__ values, const data_t *__restrict__ values_diag_inv, const index_t *__restrict__ row_orders,
     const int *__restrict__ row_offset, const int warp_count, const int m, const data_t *__restrict__ b, data_t *__restrict__ x, volatile char *__restrict__ finished, int *curr_id
@@ -190,10 +189,8 @@ __global__ void sptrsv_capellini_adaptive_kernel(
 
     if (FORCE_THREAD || (!FORCE_WARP && use_thread)) {
         // assign one thread for current row
-        assert(!FORCE_WARP);
 
-        // row id
-        int i;
+        int i; // row id
         if (FORCE_THREAD) {
             i = id;
         } else {
@@ -201,7 +198,7 @@ __global__ void sptrsv_capellini_adaptive_kernel(
         }
 
         if (i >= m) return;
-        if (REORDER_ROW) i = row_orders[i];
+        if (USE_REORDER_ROW) i = row_orders[i];
 
         const int begin = r_pos[i], end = r_pos[i + 1];
         data_t bi = b[i], diag_inv = values_diag_inv[i];
@@ -222,10 +219,8 @@ __global__ void sptrsv_capellini_adaptive_kernel(
         }
     } else {
         // assign one warp for current row
-        assert(!FORCE_THREAD);
 
-        // row id
-        int i;
+        int i; // row id
         if (FORCE_WARP) {
             i = w;
         } else {
@@ -233,7 +228,7 @@ __global__ void sptrsv_capellini_adaptive_kernel(
         }
 
         if (i >= m) return;
-        if (REORDER_ROW) i = row_orders[i];
+        if (USE_REORDER_ROW) i = row_orders[i];
 
         data_t left_sum = 0;
         const int begin = r_pos[i], end = r_pos[i + 1];
@@ -279,3 +274,4 @@ void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict
     sptrsv_capellini_adaptive_kernel<<<ceiling(m * 32, BLOCK_SIZE), BLOCK_SIZE>>>(mat->gpu_r_pos, info->c_idx_sorted, info->values_sorted, info->values_diag_inv, info->row_orders, info->row_offset, info->warp_count, m, b, x, finished, curr_id);
     CUDA_CHECK(cudaGetLastError());
 }
+
