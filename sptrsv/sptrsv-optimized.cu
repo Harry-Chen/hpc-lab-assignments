@@ -20,7 +20,7 @@
 #endif
 
 #ifndef FORCE_USE_WARP
-#define FORCE_USE_WARP false
+#define FORCE_USE_WARP true
 #endif
 
 const char* version_name = "optimized version";
@@ -159,13 +159,22 @@ __global__ void sptrsv_capellini_warp_kernel(
 ) {
     
     // allocate thread id by scheduling order
-    const int id = atomicAdd(curr_id, 1);
+    // const int id = atomicAdd(curr_id, 1);
     // const int id = blockDim.x * blockIdx.x + threadIdx.x;
+    
+    const int lane_id = threadIdx.x & 31;
+    int id = 0;
+    if (lane_id == 0) {
+        id = atomicAdd(curr_id, 1) << 5;
+    }
+    id = __shfl(id, 0) + lane_id;
     const int w = id >> 5;
-    const int lane_id = id & 31;
+    
+#if !FORCE_USE_THREAD
     if (w >= warp_count) return;
+#endif
 
-    bool use_thread = row_offset[w + 1] > row_offset[w] + 1;
+    bool use_thread = FORCE_USE_THREAD || (!FORCE_USE_WARP && row_offset[w + 1] > row_offset[w] + 1);
 
     if (FORCE_USE_THREAD || (!FORCE_USE_WARP && use_thread)) {
         // one thread for current row
@@ -180,24 +189,23 @@ __global__ void sptrsv_capellini_warp_kernel(
 #endif
         if (i >= m) return;
 
-        data_t left_sum = 0;
         const int begin = r_pos[i], end = r_pos[i + 1];
         data_t bi = b[i], diag_inv = values_diag_inv[i];
-        bi *= diag_inv;
         
         for (int j = begin; j < end;) {
             int col = c_idx[j];
-            volatile char *finished_col = finished + col;
+            // volatile char *finished_col = finished + col;
+            if (col == i) {
+                x[i] = bi * diag_inv;
+                __threadfence();
+                finished[col] = 1;
+                break;
+                // j++;
+            }
             while (finished[col]) {
                 // __threadfence();
-                left_sum += values[j] * x[col];
+                bi -= values[j] * x[col];
                 col = c_idx[++j];
-            }
-            if (col == i) {
-                x[i] = bi - left_sum * diag_inv;
-                __threadfence();
-                finished[i] = 1;
-                ++j;
             }
         }
     } else {
@@ -222,10 +230,10 @@ __global__ void sptrsv_capellini_warp_kernel(
         for (int j = begin + lane_id; j < end - 1; j += 32) {
             data_t value = values[j];
             int col = c_idx[j];
-            while (!finished[col]) {
+            while (finished[col] == 0) {
                 __threadfence();
             }
-            volatile data_t *x_col = x + col;
+            // volatile data_t *x_col = x + col;
             left_sum += value * x[col];
         }
 
