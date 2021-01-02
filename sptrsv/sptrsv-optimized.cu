@@ -335,7 +335,7 @@ void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict
     // select algorithms with different template types
     if (curr_algo.use_thread && !curr_algo.use_warp) {
         // thread only
-        sptrsv_capellini_adaptive_kernel<true, false><<<ceiling(m * 32, block_size), block_size>>>(mat->gpu_r_pos, info->c_idx_sorted, info->values_sorted, info->values_diag_inv, info->row_orders, info->row_offset, info->warp_count, m, b, x, finished, curr_id, curr_algo.reorder_row);
+        sptrsv_capellini_adaptive_kernel<true, false><<<ceiling(m, block_size), block_size>>>(mat->gpu_r_pos, info->c_idx_sorted, info->values_sorted, info->values_diag_inv, info->row_orders, info->row_offset, info->warp_count, m, b, x, finished, curr_id, curr_algo.reorder_row);
     } else if (!curr_algo.use_thread && curr_algo.use_warp) {
         // warp only
         sptrsv_capellini_adaptive_kernel<false, true><<<ceiling(m * 32, block_size), block_size>>>(mat->gpu_r_pos, info->c_idx_sorted, info->values_sorted, info->values_diag_inv, info->row_orders, info->row_offset, info->warp_count, m, b, x, finished, curr_id, curr_algo.reorder_row);
