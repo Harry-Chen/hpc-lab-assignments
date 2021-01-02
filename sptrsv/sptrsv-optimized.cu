@@ -53,12 +53,12 @@ struct algo_info_t {
 
 algo_info_t select_algorithm(int m, int nnz, int level) {
     algo_info_t info;
-    double avg_nnz = (double) m / nnz;
-    info.use_thread = avg_nnz < 8 || (level >= 1280 && level < 2000);
-    info.use_warp = ~info.use_thread;
-    info.reorder_row = ~info.use_thread;
+    double avg_nnz = (double) nnz / m;
+    info.use_thread = avg_nnz < 8 || (level >= 1250 && level < 2000);
+    info.use_warp = !info.use_thread;
+    info.reorder_row = !info.use_thread;
     // block size
-    if (avg_nnz >= 50) {
+    if (avg_nnz >= 28.5 || (avg_nnz >= 1.5 && avg_nnz < 2)) {
         info.block_size = 64;
     } else if (avg_nnz >= 5) {
         info.block_size = 128;
@@ -68,6 +68,7 @@ algo_info_t select_algorithm(int m, int nnz, int level) {
     info.sort_column = (avg_nnz >= 1.5 && avg_nnz <= 8) || (avg_nnz >= 9 && avg_nnz <= 10) || (avg_nnz > 10 && (
         (level >= 1250 && level < 2000) || (level >= 3000 && level < 3500) || (level >= 4000 && level < 5000)
     ));
+    printf("%d %d %d %d %d\n", info.use_thread, info.use_warp, info.reorder_row, info.sort_column, info.block_size);
     return info;
 }
 
