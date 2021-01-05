@@ -44,7 +44,7 @@
 #endif
 
 #ifndef DEBUG_PRINT
-#define DEBUG_PRINT true
+#define DEBUG_PRINT false
 #endif
 
 #ifndef PERSISTENT_KERNEL
@@ -82,9 +82,9 @@ algo_info_t select_algorithm(int m, int nnz, int level) {
     } else {
         info.block_size = 256;
     }
-    if (info.persistent_kernel) {
+    if (info.persistent_kernel && info.use_warp) {
         info.block_size = 64;
-        info.grid_size = avg_nnz < 150 ? 180 : 90;
+        info.grid_size = avg_nnz < 160 ? 180 : 90;
     }
     // whether sort columns
     info.sort_column = (avg_nnz >= 1.5 && avg_nnz <= 8) || (avg_nnz >= 9 && avg_nnz <= 10) || (avg_nnz > 10 && (
