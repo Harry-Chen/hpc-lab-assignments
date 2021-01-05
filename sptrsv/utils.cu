@@ -141,9 +141,10 @@ int check_answer(dist_matrix_t *mat, const char* filename, data_t* y) {
 
     for(i = 0; i < m; ++i) {
         data_t err = abs(y[i] - ref[i]);
-        if(err > maxerr) {
+        if(err > EPS_TOL) {
             maxerr = err;
             mi = i;
+            break;
         }
     }
     if(maxerr > EPS_TOL) {
