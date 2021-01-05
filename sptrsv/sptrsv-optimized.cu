@@ -40,7 +40,7 @@
 #endif
 
 #ifndef DEBUG_PRINT
-#define DEBUG_PRINT false
+#define DEBUG_PRINT true
 #endif
 
 #ifndef PERSISTENT_KERNEL
@@ -68,7 +68,7 @@ algo_info_t select_algorithm(int m, int nnz, int level) {
     // reorder_row only when using thread
     info.reorder_row = !info.use_thread;
     // select kernel type
-    info.persistent_kernel = (avg_nnz <= 10 && !(avg_nnz >= 1.6 && avg_nnz < 2) && !(avg_nnz >= 5 && avg_nnz < 8)) || (avg_nnz >= 50 && avg_nnz < 80) || (avg_nnz >= 200);
+    info.persistent_kernel = (avg_nnz <= 7 && !(avg_nnz >= 1.6 && avg_nnz < 2)) || (avg_nnz >= 50 && avg_nnz < 72.5) || (avg_nnz >= 200);
     // select block size
     if (avg_nnz >= 50 || (avg_nnz >= 1.6 && avg_nnz < 2)) {
         info.block_size = 64;
@@ -454,25 +454,21 @@ void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict
     // select algorithms with different template types
     if (curr_algo.use_thread && !curr_algo.use_warp) {
         // thread only
-        if (curr_algo.persistent_kernel) {
-            sptrsv_capellini_persistent_kernel<true, false><<<90, 64>>>(PARAMS);
-        } else {
-            sptrsv_capellini_adaptive_kernel<true, false><<<ceiling(m, block_size), block_size>>>(PARAMS);
-        }
+        sptrsv_capellini_adaptive_kernel<true, false><<<ceiling(m, block_size), block_size>>>(PARAMS);
     } else if (!curr_algo.use_thread && curr_algo.use_warp) {
         // warp only
-        if (curr_algo.persistent_kernel) {
-            sptrsv_capellini_adaptive_kernel<false, true><<<90, 64>>>(PARAMS);
+        if (true || curr_algo.persistent_kernel) {
+            sptrsv_capellini_persistent_kernel<false, true><<<270, 64>>>(PARAMS);
         } else {
-            sptrsv_capellini_adaptive_kernel<true, false><<<ceiling(m * 32, block_size), block_size>>>(PARAMS);
+            sptrsv_capellini_adaptive_kernel<false, true><<<ceiling(m * 32, block_size), block_size>>>(PARAMS);
         }
     } else {
         // hybrid mode
         assert(false);
         if (curr_algo.persistent_kernel) {
-            sptrsv_capellini_adaptive_kernel<false, false><<<90, 64>>>(PARAMS);
+            sptrsv_capellini_persistent_kernel<false, false><<<90, 64>>>(PARAMS);
         } else {
-            sptrsv_capellini_adaptive_kernel<true, false><<<ceiling(m * 32, block_size), block_size>>>(PARAMS);
+            sptrsv_capellini_adaptive_kernel<false, false><<<ceiling(m * 32, block_size), block_size>>>(PARAMS);
         }
     }
 
