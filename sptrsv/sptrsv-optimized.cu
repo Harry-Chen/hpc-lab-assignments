@@ -63,7 +63,7 @@ algo_info_t select_algorithm(int m, int nnz, int level) {
     // reorder_row only when using thread
     info.reorder_row = !info.use_thread;
     // select block size
-    if (avg_nnz >= 28.5 || (avg_nnz >= 1.5 && avg_nnz < 2)) {
+    if (avg_nnz >= 50 || (avg_nnz >= 1.6 && avg_nnz < 2)) {
         info.block_size = 64;
     } else if (avg_nnz >= 5) {
         info.block_size = 128;
@@ -247,7 +247,8 @@ __global__ void sptrsv_capellini_warp_kernel(
         bi *= diag_inv;
             
         // calculate sum of previous columns
-        for (int j = begin + lane_id; j < end - 1; j += 32) {
+#pragma unroll
+	for (int j = begin + lane_id; j < end - 1; j += 32) {
             data_t value = values[j];
             int col = c_idx[j];
             while (finished[col] == 0) {
@@ -260,6 +261,7 @@ __global__ void sptrsv_capellini_warp_kernel(
         left_sum *= diag_inv;
     
         // reduce within warp
+#pragma unroll
         for (int offset = 16; offset > 0; offset >>= 1) {
             left_sum += __shfl_down_sync(0xFFFFFFFF, left_sum, offset);
         }
