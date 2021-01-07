@@ -149,6 +149,8 @@ void preprocess(dist_matrix_t *mat) {
     
     if (all_diag) {
         curr_algo.all_diag = true;
+        CUDA_CHECK(cudaMemcpyAsync(info->values_diag_inv, values_diag_inv, m * sizeof(data_t), cudaMemcpyHostToDevice, info->copy_stream));
+        mat->additional_info = info;
 	return;
     }
     curr_algo = select_algorithm(m, nnz, max_level + 1);
