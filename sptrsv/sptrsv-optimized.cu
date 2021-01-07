@@ -60,6 +60,7 @@ struct algo_info_t {
     bool reorder_row = REORDER_ROW;
     bool sort_column = SORT_COLUMN;
     bool persistent_kernel = PERSISTENT_KERNEL;
+    bool all_diag = false;
     int block_size = BLOCK_SIZE;
     int grid_size = GRID_SIZE;
 };
@@ -128,20 +129,28 @@ void preprocess(dist_matrix_t *mat) {
     memcpy(c_idx_sorted, mat->c_idx, sizeof(index_t) * nnz);
     memcpy(values_sorted, mat->values, sizeof(data_t) * nnz);
 
+    bool all_diag = true;
     // count max levels
     for (int i = 0; i < m; ++i) {
         int begin = mat->r_pos[i], end = mat->r_pos[i + 1];
         // level for current row
         int l = -1;
+	bool diag = true;
         for (int j = begin; j < end - 1; j++) {
             int col = mat->c_idx[j];
+	    diag &= mat->values[j] == 0.0;
             l = max(levels[col], l);
         }
+	all_diag &= diag;
         levels[i] = l + 1;
         max_level = max(max_level, l + 1);
         values_diag_inv[i] = 1 / mat->values[end - 1]; // calcualte reciprocals on diagonal
     }
-
+    
+    if (all_diag) {
+        curr_algo.all_diag = true;
+	return;
+    }
     curr_algo = select_algorithm(m, nnz, max_level + 1);
 
     // warp count in hybrid mode
@@ -395,6 +404,12 @@ __global__ void sptrsv_capellini_adaptive_kernel(
 }
 
 
+__global__ void element_wise_kernel(int m, const data_t *__restrict__ values_diag_inv, const data_t *__restrict__ b, data_t *__restrict__ x) {
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+    if (i < m) {
+        x[i] = b[i] * values_diag_inv[i];
+    }
+}
 
 void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict__ x) {
     int m = mat->global_m;
@@ -412,7 +427,9 @@ void sptrsv(dist_matrix_t *mat, const data_t *__restrict__ b, data_t *__restrict
 #define PARAMS mat->gpu_r_pos, info->c_idx_sorted, info->values_sorted, info->values_diag_inv, info->row_orders, info->row_offset, info->warp_count, m, b, x, finished, curr_id, curr_algo.reorder_row
 
     // select algorithms with different template types
-    if (curr_algo.use_thread && !curr_algo.use_warp) {
+    if (curr_algo.all_diag) {
+        element_wise_kernel<<<ceiling(m, 1024), 1024>>>(m, info->values_diag_inv, b, x);
+    } else if (curr_algo.use_thread && !curr_algo.use_warp) {
         // thread only
         sptrsv_capellini_adaptive_kernel<true, false><<<ceiling(m, block_size), block_size>>>(PARAMS);
     } else if (!curr_algo.use_thread && curr_algo.use_warp) {
